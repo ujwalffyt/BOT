@@ -238,34 +238,65 @@ class Host:
             self.client.images.get(VPS_IMAGE)
         except docker.errors.ImageNotFound:
             self.client.images.build(path="/app/vps-image", tag=VPS_IMAGE, pull=True, rm=True, forcerm=True)
+    def wait_for_sshx_link(self, container, timeout=45):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            container.reload()
+            try:
+                raw = container.logs(stdout=True, stderr=True, tail=100)
+                output = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+            except docker.errors.APIError:
+                output = ""
+            link = next((part for part in output.split() if part.startswith("https://sshx.io/s/")), None)
+            if link:
+                return link.rstrip(".,;)]}")
+            if container.status != "running":
+                raise RuntimeError(
+                    "The sshx process exited before producing a session link. "
+                    "Inspect its logs with docker logs " + container.name
+                )
+            time.sleep(0.75)
+        raise RuntimeError(
+            f"sshx did not return a session link within {timeout} seconds. "
+            "Check outbound HTTPS/DNS and inspect the container logs."
+        )
+
     def provision_vps(self, order, ram, cpu):
         self.check_capacity(ram, cpu)
         self.build_vps_image()
         self.check_capacity(ram, cpu)
         sid = uuid.uuid4().hex[:8]
         name, net = f"neonhost-vps-{sid}", f"neonhost-vps-net-{sid}"
-        port = self.free_port(SSH_FIRST, SSH_LAST)
-        network = self.client.networks.create(net, driver="bridge", labels={"neonhost.service": sid})
+        network = self.client.networks.create(
+            net, driver="bridge", labels={"neonhost.managed": "true", "neonhost.service": sid}
+        )
+        container = None
         try:
             container = self.client.containers.run(
-                VPS_IMAGE, name=name, detach=True,
-                environment={"SSH_PUBLIC_KEY": order["data"]["ssh_key"]},
-                ports={"22/tcp": port}, network=net,
+                VPS_IMAGE, name=name, detach=True, command=["sshx"],
+                tty=True, stdin_open=True, network=net,
                 mem_limit=f"{ram}m", memswap_limit=f"{ram}m",
                 nano_cpus=int(cpu * 1_000_000_000), pids_limit=256,
-                cap_drop=["ALL"],
-                cap_add=["NET_BIND_SERVICE", "CHOWN", "DAC_OVERRIDE", "SETUID", "SETGID", "FOWNER", "SYS_CHROOT", "KILL", "SETFCAP"],
-                security_opt=["no-new-privileges:true"],
-                restart_policy={"Name": "unless-stopped"},
-                labels={"neonhost.managed": "true", "neonhost.kind": "vps", "neonhost.service": sid},
+                cap_drop=["ALL"], security_opt=["no-new-privileges:true"],
+                restart_policy={"Name": "unless-stopped"}, init=True,
+                labels={"neonhost.managed": "true", "neonhost.kind": "vps-sshx", "neonhost.service": sid},
             )
+            link = self.wait_for_sshx_link(container)
         except Exception:
-            network.remove()
+            if container is not None:
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass
+            try:
+                network.remove()
+            except Exception:
+                pass
             raise
         return {"id": sid, "user_id": order["user_id"], "order_id": order["id"],
-                "kind": "vps-container", "name": "SSH VPS container", "status": "running",
+                "kind": "sshx-vps-container", "name": "SSHX browser VPS", "status": "running",
                 "container": container.name, "network": net, "ram_mb": ram, "cpu": cpu,
-                "host_port": port, "app_port": 22, "url": f"ssh root@{PUBLIC_HOST} -p {port}",
+                "host_port": None, "app_port": None, "url": link,
                 "domain": "", "repo": "", "image": VPS_IMAGE}
     def clone(self, repo, folder):
         shutil.rmtree(folder, ignore_errors=True)
