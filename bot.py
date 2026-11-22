@@ -389,7 +389,7 @@ class Host:
             raise RuntimeError("Docker build failed: " + safe_error(str(exc))) from exc
         finally:
             shutil.rmtree(folder, ignore_errors=True)
-        self.check_capacity(ram, cpu)
+        self.check_capacity(ram, cpu, exclude_service_id)
         name = f"neonhost-web-{sid}"
         domain = f"{slug}-{sid}.{DOMAIN}" if DOMAIN else ""
         port = None if domain else self.free_port(WEB_FIRST, WEB_LAST)
@@ -1252,23 +1252,10 @@ async def stop(interaction: discord.Interaction, service_id: str):
 async def resume(interaction: discord.Interaction, service_id: str):
     await set_service(interaction, service_id, True)
 
-@bot.tree.command(name="redeploy", description="Rebuild your website using its saved GitHub repository")
+@bot.tree.command(name="redeploy", description="Redeploy one of your websites from GitHub")
 async def redeploy(interaction: discord.Interaction, service_id: str):
-    s = DB.service(service_id)
-    if not s or s["user_id"] != interaction.user.id or s["kind"] != "web-app":
-        await interaction.response.send_message("Website not found or you do not own it.", ephemeral=True)
-        return
-    await interaction.response.defer(ephemeral=True, thinking=True)
-    old_order = {"id": s["order_id"], "user_id": s["user_id"],
-                 "data": {"repo": s["repo"], "slug": s["name"], "port": s["app_port"]}}
-    try:
-        replacement = await asyncio.to_thread(HOST.provision_web, old_order, s["ram_mb"], s["cpu"], service_id)
-        DB.add_service(replacement)
-        await asyncio.to_thread(HOST.remove, s)
-        DB.delete_service(service_id)
-        await interaction.followup.send(f"Website redeployed. New service ID: {replacement['id']} • {replacement['url']}", ephemeral=True)
-    except Exception as exc:
-        await interaction.followup.send("Redeploy failed; previous service was kept where possible. " + safe_error(str(exc)), ephemeral=True)
+    await website_control_action(interaction, service_id, "redeploy")
+
 
 @bot.tree.command(name="orders", description="Admin: list pending hosting requests")
 async def orders(interaction: discord.Interaction):
