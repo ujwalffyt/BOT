@@ -707,7 +707,7 @@ async def start(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False, thinking=False)
     embed = discord.Embed(
         title="NeonHost • Hosting & Deploy",
-        description="Deploy a website from GitHub or request an SSH-enabled container VPS. "
+        description="Deploy a website from GitHub or request an OS-selected VPS with an sshx browser terminal. "
                     "New services are reviewed by an administrator before provisioning.",
         color=discord.Color.blurple())
     embed.add_field(name="Web hosting", value="GitHub → Docker build → live URL", inline=True)
@@ -748,6 +748,11 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 async def plans(interaction: discord.Interaction):
     embed = discord.Embed(title="Hosting resource limits", color=discord.Color.green())
     embed.add_field(name="VPS", value=f"Default request: {DEFAULT_VPS_RAM} MB RAM / {DEFAULT_VPS_CPU} CPU quota\nMaximum per service: {MAX_RAM} MB / {MAX_CPU} CPU quota", inline=False)
+    embed.add_field(
+        name="Available VPS operating systems",
+        value="Ubuntu 24.04 LTS\nDebian 12 Bookworm\nAlpine Linux 3.22",
+        inline=False,
+    )
     embed.add_field(name="Web hosting", value=f"Default: {DEFAULT_WEB_RAM} MB RAM / {DEFAULT_WEB_CPU} CPU quota per app", inline=False)
     embed.add_field(name="Read carefully", value="CPU values are limits, not dedicated cores. sshx links are live shared terminal sessions; anyone with a link can interact. Disk quotas are not enabled in this version.", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
