@@ -873,10 +873,37 @@ async def myvps(interaction: discord.Interaction, service_id: str | None = None)
         return
 
     item = items[0]
+    memory_usage = "Not available (container stopped)"
+    cpu_usage = "Not available (container stopped)"
+    container_short_id = "unknown"
     try:
         container = await asyncio.to_thread(HOST.client.containers.get, item["container"])
         await asyncio.to_thread(container.reload)
         actual_status = container.status
+        container_short_id = container.short_id
+        if actual_status == "running":
+            stats = await asyncio.to_thread(container.stats, stream=False)
+            memory_stats = stats.get("memory_stats", {})
+            memory_bytes = int(memory_stats.get("usage", 0))
+            memory_cache = int(memory_stats.get("stats", {}).get("inactive_file", 0))
+            memory_used_mb = max(0, memory_bytes - memory_cache) / 1024 / 1024
+            memory_usage = f"{memory_used_mb:.1f} MB used / {item['ram_mb']} MB cap"
+
+            cpu_stats = stats.get("cpu_stats", {})
+            previous_cpu = stats.get("precpu_stats", {})
+            cpu_delta = (
+                cpu_stats.get("cpu_usage", {}).get("total_usage", 0)
+                - previous_cpu.get("cpu_usage", {}).get("total_usage", 0)
+            )
+            system_delta = (
+                cpu_stats.get("system_cpu_usage", 0)
+                - previous_cpu.get("system_cpu_usage", 0)
+            )
+            cpu_count = cpu_stats.get("online_cpus") or len(cpu_stats.get("cpu_usage", {}).get("percpu_usage", [])) or 1
+            if system_delta > 0 and cpu_delta >= 0:
+                cpu_usage = f"{(cpu_delta / system_delta) * cpu_count * 100:.1f}% at sample time"
+            else:
+                cpu_usage = "Collecting first CPU sample"
     except docker.errors.NotFound:
         actual_status = "missing"
     except Exception as exc:
@@ -885,16 +912,18 @@ async def myvps(interaction: discord.Interaction, service_id: str | None = None)
     os_name = VPS_OS_OPTIONS.get(item.get("os", "debian-12"), VPS_OS_OPTIONS["debian-12"])["label"]
     embed = discord.Embed(
         title="My VPS • " + os_name,
-        description=f"Instance ID: {item['id']}",
+        description=f"Instance ID: {item['id']} • Container: {container_short_id}",
         color=discord.Color.green() if actual_status == "running" else discord.Color.orange(),
     )
     embed.add_field(name="Operating system", value=os_name, inline=True)
     embed.add_field(name="Container status", value=actual_status, inline=True)
     embed.add_field(name="RAM allocation", value=f"{item['ram_mb']} MB cap", inline=True)
+    embed.add_field(name="RAM usage", value=memory_usage, inline=True)
     embed.add_field(name="CPU allocation", value=f"{item['cpu']} CPU quota", inline=True)
+    embed.add_field(name="CPU usage", value=cpu_usage, inline=True)
     embed.add_field(name="Created", value=item["created"][:19].replace("T", " ") + " UTC", inline=True)
     embed.add_field(name="Access", value="Use SSH / New Link to generate a fresh sshx browser-terminal URL.", inline=False)
-    embed.add_field(name="Storage", value="Persistent disk quota is not configured; reinstall deletes the container filesystem.", inline=False)
+    embed.add_field(name="Storage", value="Per-customer disk quota is not configured; reinstall deletes the container filesystem.", inline=False)
     await interaction.response.send_message(
         embed=embed, view=VPSControlView(item["user_id"], item["id"]), ephemeral=True)
 
