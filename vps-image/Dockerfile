@@ -22,7 +22,7 @@ RUN set -eux; \
     sh /tmp/install-sshx; \
     SSHX_BIN="$(command -v sshx || find /root/.local/bin /root/.cargo/bin /usr/local/bin /usr/bin -type f -name sshx -print -quit 2>/dev/null || true)"; \
     test -n "$SSHX_BIN"; \
-    install -m 0755 "$SSHX_BIN" /usr/local/bin/sshx; \
+    if [ "$SSHX_BIN" != "/usr/local/bin/sshx" ]; then install -m 0755 "$SSHX_BIN" /usr/local/bin/sshx; fi; \
     rm -f /tmp/install-sshx
 
 COPY entrypoint.sh /entrypoint.sh
