@@ -409,14 +409,43 @@ class Host:
                 "domain": domain, "repo": repo, "image": image}
     def set_running(self, service, running):
         container = self.client.containers.get(service["container"])
+        container.reload()
         if running:
+            if container.status == "running":
+                return None
             started_at = int(time.time())
             container.start()
             if service["kind"] == "sshx-vps-container":
                 return self.wait_for_sshx_link(container, since=started_at)
             return None
-        container.stop(timeout=10)
+        if container.status == "running":
+            container.stop(timeout=10)
         return None
+
+    def generate_sshx_link(self, service):
+        if service["kind"] != "sshx-vps-container":
+            raise RuntimeError("This service does not use sshx access.")
+        container = self.client.containers.get(service["container"])
+        container.reload()
+        if container.status == "running":
+            container.stop(timeout=10)
+        started_at = int(time.time())
+        container.start()
+        return self.wait_for_sshx_link(container, since=started_at)
+
+    def reinstall_vps(self, service):
+        if service["kind"] != "sshx-vps-container":
+            raise RuntimeError("Only sshx VPS containers can be reinstalled.")
+        os_key = service.get("os", "debian-12")
+        self.remove(service)
+        order = {
+            "id": service["order_id"],
+            "user_id": service["user_id"],
+            "data": {"os": os_key},
+        }
+        return self.provision_vps(
+            order, service["ram_mb"], service["cpu"], service_id=service["id"]
+        )
     def remove(self, service):
         try: self.client.containers.get(service["container"]).remove(force=True)
         except docker.errors.NotFound: pass
