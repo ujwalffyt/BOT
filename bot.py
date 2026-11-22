@@ -722,8 +722,9 @@ async def help_command(interaction: discord.Interaction):
     text = (
         "/start — open the panel\n/plans — show configured limits\n"
         "/vps — request an sshx browser VPS\n/web — request GitHub website deployment\n"
-        "/my — list your services\n/stop and /resume — control a service\n"
-        "/redeploy — rebuild your website from GitHub"
+        "/my — list your services\n/myvps — show VPS info and controls\n"
+        "/ssh — generate a new sshx terminal link\n/reinstall — reinstall your VPS\n"
+        "/stop and /resume — stop or start a service\n/redeploy — rebuild your website from GitHub"
     )
     if interaction.user.id in ADMIN_IDS:
         text += "\n/orders and /approve — manage requests\n/capacity and /instances — server status\n/remove — remove a service"
@@ -834,6 +835,74 @@ async def set_service(interaction, sid, running):
             await interaction.followup.send(f"Service {sid} is now {'running' if running else 'stopped'}.", ephemeral=True)
     except Exception as exc:
         await interaction.followup.send("Could not change service state: " + safe_error(str(exc)), ephemeral=True)
+
+@bot.tree.command(name="myvps", description="Show your VPS OS, RAM, CPU, status and controls")
+@app_commands.describe(service_id="Optional VPS service ID, needed only if you have more than one VPS")
+async def myvps(interaction: discord.Interaction, service_id: str | None = None):
+    items = [
+        item for item in DB.services(interaction.user.id)
+        if item["kind"] == "sshx-vps-container"
+    ]
+    if service_id:
+        selected = DB.service(service_id)
+        if not selected or selected["kind"] != "sshx-vps-container" or selected["user_id"] != interaction.user.id:
+            await interaction.response.send_message("VPS not found or you do not own it.", ephemeral=True)
+            return
+        items = [selected]
+    if not items:
+        await interaction.response.send_message(
+            "You do not have a VPS yet. Use /vps to request one.", ephemeral=True)
+        return
+    if len(items) > 1 and not service_id:
+        lines = []
+        for item in items[:20]:
+            os_name = VPS_OS_OPTIONS.get(item.get("os", "debian-12"), VPS_OS_OPTIONS["debian-12"])["label"]
+            lines.append(
+                f"ID: {item['id']} • {os_name}\n"
+                f"RAM: {item['ram_mb']} MB • CPU quota: {item['cpu']} • Status: {item['status']}"
+            )
+        await interaction.response.send_message(
+            "Your VPS instances:\n\n" + "\n\n".join(lines) + "\n\n"
+            "Run /myvps again with a service_id to open its control panel.",
+            ephemeral=True)
+        return
+
+    item = items[0]
+    try:
+        container = await asyncio.to_thread(HOST.client.containers.get, item["container"])
+        await asyncio.to_thread(container.reload)
+        actual_status = container.status
+    except docker.errors.NotFound:
+        actual_status = "missing"
+    except Exception as exc:
+        actual_status = "unknown (" + safe_error(str(exc), 120) + ")"
+
+    os_name = VPS_OS_OPTIONS.get(item.get("os", "debian-12"), VPS_OS_OPTIONS["debian-12"])["label"]
+    embed = discord.Embed(
+        title="My VPS • " + os_name,
+        description=f"Instance ID: {item['id']}",
+        color=discord.Color.green() if actual_status == "running" else discord.Color.orange(),
+    )
+    embed.add_field(name="Operating system", value=os_name, inline=True)
+    embed.add_field(name="Container status", value=actual_status, inline=True)
+    embed.add_field(name="RAM allocation", value=f"{item['ram_mb']} MB cap", inline=True)
+    embed.add_field(name="CPU allocation", value=f"{item['cpu']} CPU quota", inline=True)
+    embed.add_field(name="Created", value=item["created"][:19].replace("T", " ") + " UTC", inline=True)
+    embed.add_field(name="Access", value="Use SSH / New Link to generate a fresh sshx browser-terminal URL.", inline=False)
+    embed.add_field(name="Storage", value="Persistent disk quota is not configured; reinstall deletes the container filesystem.", inline=False)
+    await interaction.response.send_message(
+        embed=embed, view=VPSControlView(item["user_id"], item["id"]), ephemeral=True)
+
+
+@bot.tree.command(name="ssh", description="Generate a fresh sshx browser-terminal link for your VPS")
+async def ssh(interaction: discord.Interaction, service_id: str):
+    await vps_control_action(interaction, service_id, "ssh")
+
+
+@bot.tree.command(name="reinstall", description="Reinstall your VPS OS (deletes its container files)")
+async def reinstall(interaction: discord.Interaction, service_id: str):
+    await vps_control_action(interaction, service_id, "reinstall")
+
 
 @bot.tree.command(name="stop", description="Stop one of your hosting services")
 async def stop(interaction: discord.Interaction, service_id: str):
