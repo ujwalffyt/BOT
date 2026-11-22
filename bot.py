@@ -1,7 +1,5 @@
 from __future__ import annotations
 import asyncio
-import base64
-import binascii
 import json
 import logging
 import os
@@ -10,6 +8,7 @@ import shutil
 import socket
 import sqlite3
 import subprocess
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,19 +63,16 @@ DEFAULT_VPS_RAM = integer("VPS_RAM_MB", 2048)
 DEFAULT_VPS_CPU = number("VPS_CPU_CORES", 1.0)
 DEFAULT_WEB_RAM = integer("WEB_RAM_MB", 1024)
 DEFAULT_WEB_CPU = number("WEB_CPU_CORES", 1.0)
-SSH_FIRST = integer("SSH_PORT_START", 22000)
-SSH_LAST = integer("SSH_PORT_END", 22999)
 WEB_FIRST = integer("WEB_PORT_START", 8000)
 WEB_LAST = integer("WEB_PORT_END", 8999)
 DB_PATH = os.getenv("DB_PATH", "/app/data/hosting.sqlite3")
 WORK = Path(os.getenv("WORK_DIR", "/app/work"))
 SITES = Path(os.getenv("SITES_DIR", "/app/caddy/sites"))
-VPS_IMAGE = "neonhost-vps:latest"
+VPS_IMAGE = "neonhost-vps:sshx-1"
 PROXY_NETWORK = "neonhost-proxy"
 
-for low, high, label in ((SSH_FIRST, SSH_LAST, "SSH"), (WEB_FIRST, WEB_LAST, "web")):
-    if not 1024 <= low <= high <= 65535:
-        raise RuntimeError(f"Invalid {label} port range")
+if not 1024 <= WEB_FIRST <= WEB_LAST <= 65535:
+    raise RuntimeError("Invalid web port range")
 if min(RESERVED_RAM, MIN_FREE_RAM, MAX_RAM, DEFAULT_VPS_RAM, DEFAULT_WEB_RAM) < 1:
     raise RuntimeError("RAM limits must be positive")
 if min(RESERVED_CPU, MAX_CPU, DEFAULT_VPS_CPU, DEFAULT_WEB_CPU) <= 0:
