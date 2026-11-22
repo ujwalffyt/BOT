@@ -440,6 +440,8 @@ async def on_ready():
 
 @bot.tree.command(name="start", description="Open the hosting and web deployment panel")
 async def start(interaction: discord.Interaction):
+    # Defer the initial response immediately to avoid Discord's short initial-response deadline.
+    await interaction.response.defer(ephemeral=False, thinking=False)
     embed = discord.Embed(
         title="NeonHost • Hosting & Deploy",
         description="Deploy a website from GitHub or request an SSH-enabled container VPS. "
@@ -448,7 +450,7 @@ async def start(interaction: discord.Interaction):
     embed.add_field(name="Web hosting", value="GitHub → Docker build → live URL", inline=True)
     embed.add_field(name="VPS hosting", value="SSH access with enforced RAM and CPU caps", inline=True)
     embed.set_footer(text="Container VPS is not a dedicated KVM virtual machine.")
-    await interaction.response.send_message(embed=embed, view=HostingPanel())
+    await interaction.followup.send(embed=embed, view=HostingPanel())
 
 @bot.tree.command(name="help", description="Show hosting commands")
 async def help_command(interaction: discord.Interaction):
