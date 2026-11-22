@@ -973,7 +973,8 @@ async def help_command(interaction: discord.Interaction):
     text = (
         "/start — open the panel\n/plans — show configured limits\n"
         "/vps — request an sshx browser VPS\n/web — request GitHub website deployment\n"
-        "/my — list your services\n/myvps — show VPS info and controls\n"
+        "/myvps — VPS details and Start/Stop/Reinstall/SSH controls\n"
+        "/myweb — website details and Start/Stop/Redeploy/Delete controls\n"
         "/ssh — generate a new sshx terminal link\n/reinstall — reinstall your VPS\n"
         "/stop and /resume — stop or start a service\n/redeploy — rebuild your website from GitHub"
     )
@@ -1079,6 +1080,12 @@ class WebsiteDeployModal(discord.ui.Modal, title="Deploy a website"):
 @bot.tree.command(name="web", description="Open the simple GitHub website deployment form")
 async def web(interaction: discord.Interaction):
     await interaction.response.send_modal(WebsiteDeployModal())
+
+
+@bot.tree.command(name="myweb", description="View and manage your hosted websites")
+@app_commands.describe(service_id="Optional website ID; leave blank to choose from your websites")
+async def myweb(interaction: discord.Interaction, service_id: str | None = None):
+    await show_mywebsites(interaction, service_id)
 
 
 @bot.tree.command(name="my", description="List your hosting services")
