@@ -1,0 +1,7 @@
+{
+    # Add an email here for ACME certificate notifications if desired.
+}
+import /etc/caddy/sites/*.caddy
+:80 {
+    respond "NeonHost is online" 200
+}
