@@ -3,7 +3,7 @@ FROM ${BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV SHELL=/bin/bash
-ENV PATH=/root/.local/bin:/root/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ENV PATH=/root/.local/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN set -eux; \
     if command -v apt-get >/dev/null 2>&1; then \
