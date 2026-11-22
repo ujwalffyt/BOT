@@ -428,11 +428,32 @@ async def setup_hook():
     if GUILD_ID:
         guild = discord.Object(id=GUILD_ID)
         bot.tree.copy_global_to(guild=guild)
-        synced = await bot.tree.sync(guild=guild)
-        log.info("Synced %d commands to test guild %d", len(synced), GUILD_ID)
-    else:
+        try:
+            synced = await bot.tree.sync(guild=guild)
+            log.info("Synced %d commands to test guild %d", len(synced), GUILD_ID)
+            return
+        except discord.Forbidden:
+            # Missing Access: wrong guild ID, bot not in the guild, or missing app-command access.
+            log.exception(
+                "Cannot sync commands to DISCORD_GUILD_ID=%d (Missing Access). "
+                "Falling back to global command sync. Check the guild ID and bot invite scopes.",
+                GUILD_ID,
+            )
+        except discord.HTTPException:
+            log.exception(
+                "Guild command sync failed for DISCORD_GUILD_ID=%d. Trying global sync instead.",
+                GUILD_ID,
+            )
+
+    try:
         synced = await bot.tree.sync()
         log.info("Synced %d global commands", len(synced))
+    except discord.HTTPException:
+        # Do not crash the Gateway client if command-sync API is temporarily unavailable.
+        log.exception(
+            "Global slash-command sync failed. The bot will still connect; "
+            "check that the bot invite included the applications.commands scope."
+        )
 
 @bot.event
 async def on_ready():
