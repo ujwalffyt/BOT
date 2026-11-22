@@ -493,6 +493,7 @@ def request_embed(oid, user, kind, data):
     embed.add_field(name="Customer", value=f"{user} ({user.id})", inline=True)
     if kind == "vps":
         embed.add_field(name="Requested allocation", value=f"{data['ram_mb']} MB RAM / {data['cpu']} CPU quota", inline=False)
+        embed.add_field(name="Operating system", value=VPS_OS_OPTIONS.get(data.get("os", "debian-12"), VPS_OS_OPTIONS["debian-12"])["label"], inline=False)
         embed.add_field(name="Access method", value="A private sshx browser-terminal link will be generated after approval.", inline=False)
     else:
         embed.add_field(name="GitHub repository", value=data["repo"], inline=False)
@@ -507,7 +508,7 @@ class HostingPanel(discord.ui.View):
     @discord.ui.button(label="VPS hosting", style=discord.ButtonStyle.primary, emoji="🖥️")
     async def vps_button(self, interaction, button):
         await interaction.response.send_message(
-            "Request a VPS with /vps. Choose RAM and CPU quota; the bot creates an sshx browser-terminal link after approval. "
+            "Request a VPS with /vps. Choose the Linux OS, RAM and CPU quota; the bot creates an sshx browser-terminal link after approval. "
             "The administrator controls the final allocation.", ephemeral=True)
     @discord.ui.button(label="Deploy website", style=discord.ButtonStyle.success, emoji="🌐")
     async def web_button(self, interaction, button):
@@ -569,7 +570,7 @@ async def start(interaction: discord.Interaction):
                     "New services are reviewed by an administrator before provisioning.",
         color=discord.Color.blurple())
     embed.add_field(name="Web hosting", value="GitHub → Docker build → live URL", inline=True)
-    embed.add_field(name="VPS hosting", value="sshx browser terminal with enforced RAM and CPU caps", inline=True)
+    embed.add_field(name="VPS hosting", value="OS of choice + sshx terminal with enforced RAM and CPU caps", inline=True)
     embed.set_footer(text="Container VPS is not a dedicated KVM virtual machine.")
     await interaction.followup.send(embed=embed, view=HostingPanel())
 
@@ -610,20 +611,31 @@ async def plans(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="vps", description="Request a VPS with an sshx browser-terminal link")
-@app_commands.describe(ram_mb="RAM requested in MB; admin approves the actual allocation",
-                       cpu_quota="CPU quota requested; it is not a dedicated core count")
-async def vps(interaction: discord.Interaction,
-              ram_mb: app_commands.Range[int, 128, 8192],
-              cpu_quota: app_commands.Range[float, 0.1, 4.0]):
+@app_commands.describe(
+    ram_mb="RAM requested in MB; admin approves the actual allocation",
+    cpu_quota="CPU quota requested; it is not a dedicated core count",
+    os_choice="Linux distribution to install in your VPS container",
+)
+@app_commands.choices(os_choice=[
+    app_commands.Choice(name="Ubuntu 24.04 LTS", value="ubuntu-24.04"),
+    app_commands.Choice(name="Debian 12 Bookworm", value="debian-12"),
+    app_commands.Choice(name="Alpine Linux 3.22", value="alpine-3.22"),
+])
+async def vps(
+    interaction: discord.Interaction,
+    ram_mb: app_commands.Range[int, 128, 8192],
+    cpu_quota: app_commands.Range[float, 0.1, 4.0],
+    os_choice: app_commands.Choice[str],
+):
     if ram_mb > MAX_RAM or cpu_quota > MAX_CPU:
         await interaction.response.send_message(
             f"Configured maximum is {MAX_RAM} MB RAM and {MAX_CPU} CPU quota.", ephemeral=True)
         return
-    data = {"ram_mb": int(ram_mb), "cpu": float(cpu_quota)}
+    data = {"ram_mb": int(ram_mb), "cpu": float(cpu_quota), "os": os_choice.value}
     oid = DB.new_order(interaction.user.id, str(interaction.user), "vps", data)
     await interaction.response.send_message(
-        f"VPS request submitted. Order ID: {oid}. An admin must approve it. "
-        "After provisioning, a private sshx browser-terminal link will be sent to your DMs.",
+        f"VPS request submitted. Order ID: {oid}. OS: {VPS_OS_OPTIONS[os_choice.value]['label']}. "
+        "An admin must approve it. Your sshx browser-terminal link will be sent by DM after provisioning.",
         ephemeral=True)
     await notify_admin(request_embed(oid, interaction.user, "vps", data))
 
