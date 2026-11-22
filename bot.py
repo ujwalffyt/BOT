@@ -504,25 +504,31 @@ def request_embed(oid, user, kind, data):
 
 class HostingPanel(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=300)
-    @discord.ui.button(label="VPS hosting", style=discord.ButtonStyle.primary, emoji="🖥️")
+        super().__init__(timeout=900)
+
+    @discord.ui.button(label="VPS Hosting", style=discord.ButtonStyle.primary, emoji="🖥️", row=0)
     async def vps_button(self, interaction, button):
         await interaction.response.send_message(
-            "Request a VPS with /vps. Choose the Linux OS, RAM and CPU quota; the bot creates an sshx browser-terminal link after approval. "
-            "The administrator controls the final allocation.", ephemeral=True)
-    @discord.ui.button(label="Deploy website", style=discord.ButtonStyle.success, emoji="🌐")
+            "Use /vps to choose Ubuntu, Debian or Alpine, then select RAM and CPU. "
+            "Your sshx terminal link is sent privately after admin approval.",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="Deploy Website", style=discord.ButtonStyle.success, emoji="🌐", row=0)
     async def web_button(self, interaction, button):
+        await interaction.response.send_modal(WebsiteDeployModal())
+
+    @discord.ui.button(label="My VPS", style=discord.ButtonStyle.secondary, emoji="🖥️", row=1)
+    async def my_vps_button(self, interaction, button):
         await interaction.response.send_message(
-            "Deploy with /web. Send a public GitHub repo, the app's internal port, and a site slug. "
-            "The repository must have a Dockerfile and listen on 0.0.0.0.", ephemeral=True)
-    @discord.ui.button(label="My services", style=discord.ButtonStyle.secondary, emoji="📦")
-    async def my_button(self, interaction, button):
-        items = DB.services(interaction.user.id)
-        if not items:
-            await interaction.response.send_message("You have no active services.", ephemeral=True)
-            return
-        lines = [f"{s['id']} • {s['name']} • {s['status']} • {s['ram_mb']} MB / {s['cpu']} CPU" for s in items[:15]]
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            "Run /myvps to open your VPS details and its Start, Stop, Reinstall and SSH controls.",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="My Websites", style=discord.ButtonStyle.secondary, emoji="📂", row=1)
+    async def my_websites_button(self, interaction, button):
+        await show_mywebsites(interaction)
+
 
 class VPSControlView(discord.ui.View):
     def __init__(self, owner_id: int, service_id: str):
