@@ -30,7 +30,7 @@ jobs:
           SITES_DIR: .ci/sites
         run: |
           mkdir -p .ci
-          python -c "import bot; commands = bot.bot.tree.get_commands(); [command.to_dict() for command in commands]; print('Registered slash commands:', ', '.join(command.name for command in commands))"
+          python -c "import bot; commands = bot.bot.tree.get_commands(); [command.to_dict(bot.bot.tree) for command in commands]; print('Registered slash commands:', ', '.join(command.name for command in commands))"
       - name: Check shell scripts
         run: bash -n deploy.sh vps-image/entrypoint.sh
       - name: Validate Compose configuration
