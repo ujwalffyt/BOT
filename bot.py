@@ -1060,8 +1060,9 @@ class WebsiteDeployModal(discord.ui.Modal, title="Deploy a website"):
         max_length=250,
     )
     app_port = discord.ui.TextInput(
-        label="Application port",
-        placeholder="3000 (Node/Next), 8080, or 80",
+        label="Application port (default: 3000)",
+        placeholder="Use 80 or 8080 if your app needs it",
+        default="3000",
         max_length=5,
     )
     site_slug = discord.ui.TextInput(
