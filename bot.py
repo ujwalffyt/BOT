@@ -671,6 +671,251 @@ async def vps_control_action(interaction: discord.Interaction, service_id: str, 
         log.exception("VPS action %s failed for %s", action, service_id)
 
 
+def website_embed(service: dict, status: str | None = None) -> discord.Embed:
+    current_status = status or service["status"]
+    embed = discord.Embed(
+        title="My Website • " + service["name"],
+        description=f"Service ID: {service['id']}",
+        color=discord.Color.green() if current_status == "running" else discord.Color.orange(),
+    )
+    embed.add_field(name="Status", value=current_status, inline=True)
+    embed.add_field(name="Website URL", value=service["url"], inline=False)
+    embed.add_field(name="RAM cap", value=f"{service['ram_mb']} MB", inline=True)
+    embed.add_field(name="CPU quota", value=str(service["cpu"]), inline=True)
+    embed.add_field(name="App port", value=str(service["app_port"]), inline=True)
+    embed.add_field(name="GitHub repository", value=service["repo"], inline=False)
+    embed.add_field(name="Created", value=service["created"][:19].replace("T", " ") + " UTC", inline=True)
+    return embed
+
+
+async def actual_container_status(service: dict) -> str:
+    try:
+        container = await asyncio.to_thread(HOST.client.containers.get, service["container"])
+        await asyncio.to_thread(container.reload)
+        return container.status
+    except docker.errors.NotFound:
+        return "missing"
+    except Exception as exc:
+        return "unknown (" + safe_error(str(exc), 100) + ")"
+
+
+class WebsiteControlView(discord.ui.View):
+    def __init__(self, owner_id: int, service_id: str):
+        super().__init__(timeout=900)
+        self.owner_id = owner_id
+        self.service_id = service_id
+
+        actions = [
+            ("Start", discord.ButtonStyle.success, "start"),
+            ("Stop", discord.ButtonStyle.secondary, "stop"),
+            ("Redeploy", discord.ButtonStyle.primary, "redeploy"),
+            ("Delete", discord.ButtonStyle.danger, "delete"),
+        ]
+        for label, style, action in actions:
+            button = discord.ui.Button(label=label, style=style)
+
+            async def callback(interaction: discord.Interaction, selected_action=action):
+                await website_control_action(interaction, self.service_id, selected_action)
+
+            button.callback = callback
+            self.add_item(button)
+
+        service = DB.service(service_id)
+        if service and service["url"].startswith(("https://", "http://")):
+            self.add_item(discord.ui.Button(label="Open Website", style=discord.ButtonStyle.link, url=service["url"]))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id and interaction.user.id not in ADMIN_IDS:
+            await interaction.response.send_message("You do not own this website.", ephemeral=True)
+            return False
+        return True
+
+
+class MyWebsitesSelect(discord.ui.Select):
+    def __init__(self, owner_id: int, items: list[dict]):
+        self.owner_id = owner_id
+        options = []
+        for item in items[:25]:
+            description = f"{item['status']} • {item['ram_mb']} MB RAM • {item['cpu']} CPU"
+            options.append(discord.SelectOption(
+                label=(item["name"] + " • " + item["id"])[:100],
+                value=item["id"],
+                description=description[:100],
+            ))
+        super().__init__(
+            placeholder="Choose a website to manage",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id and interaction.user.id not in ADMIN_IDS:
+            await interaction.response.send_message("You do not own these websites.", ephemeral=True)
+            return
+        service = DB.service(self.values[0])
+        if not service or service["kind"] != "web-app":
+            await interaction.response.send_message("Website not found.", ephemeral=True)
+            return
+        status = await actual_container_status(service)
+        await interaction.response.edit_message(
+            content=None,
+            embed=website_embed(service, status),
+            view=WebsiteControlView(service["user_id"], service["id"]),
+        )
+
+
+class MyWebsitesView(discord.ui.View):
+    def __init__(self, owner_id: int, items: list[dict]):
+        super().__init__(timeout=900)
+        self.add_item(MyWebsitesSelect(owner_id, items))
+
+
+class ConfirmDeleteWebsiteView(discord.ui.View):
+    def __init__(self, owner_id: int, service_id: str):
+        super().__init__(timeout=60)
+        self.owner_id = owner_id
+        self.service_id = service_id
+
+        confirm = discord.ui.Button(label="Confirm delete", style=discord.ButtonStyle.danger)
+        cancel = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
+
+        async def confirm_callback(interaction: discord.Interaction):
+            if interaction.user.id != self.owner_id and interaction.user.id not in ADMIN_IDS:
+                await interaction.response.send_message("You do not own this website.", ephemeral=True)
+                return
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            service = DB.service(self.service_id)
+            if not service or (service["user_id"] != self.owner_id and interaction.user.id not in ADMIN_IDS):
+                await interaction.followup.send("Website not found or access denied.", ephemeral=True)
+                return
+            try:
+                await asyncio.to_thread(HOST.remove, service)
+                DB.delete_service(self.service_id)
+                await interaction.followup.send(
+                    f"Website {service['name']} was deleted. Its container filesystem and deployment image were removed.",
+                    ephemeral=True,
+                )
+            except Exception as exc:
+                await interaction.followup.send("Delete failed: " + safe_error(str(exc)), ephemeral=True)
+
+        async def cancel_callback(interaction: discord.Interaction):
+            await interaction.response.edit_message(content="Delete cancelled.", view=None)
+
+        confirm.callback = confirm_callback
+        cancel.callback = cancel_callback
+        self.add_item(confirm)
+        self.add_item(cancel)
+
+
+async def website_control_action(interaction: discord.Interaction, service_id: str, action: str):
+    service = DB.service(service_id)
+    if not service or service["kind"] != "web-app":
+        await interaction.response.send_message("Website not found.", ephemeral=True)
+        return
+    if service["user_id"] != interaction.user.id and interaction.user.id not in ADMIN_IDS:
+        await interaction.response.send_message("You do not own this website.", ephemeral=True)
+        return
+
+    if action == "delete":
+        await interaction.response.send_message(
+            "Delete this website? Its running container and deployment image will be removed. "
+            "Make sure you have a copy of your source and customer data.",
+            view=ConfirmDeleteWebsiteView(service["user_id"], service_id),
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        if action in {"start", "stop"}:
+            running = action == "start"
+            await asyncio.to_thread(HOST.set_running, service, running)
+            DB.set_service_status(service_id, "running" if running else "stopped")
+            status = await actual_container_status(DB.service(service_id))
+            updated = DB.service(service_id)
+            await interaction.followup.send(
+                embed=website_embed(updated, status),
+                view=WebsiteControlView(updated["user_id"], updated["id"]),
+                ephemeral=True,
+            )
+            return
+
+        if action == "redeploy":
+            order = {
+                "id": service["order_id"],
+                "user_id": service["user_id"],
+                "data": {
+                    "repo": service["repo"],
+                    "slug": service["name"],
+                    "port": service["app_port"],
+                },
+            }
+            replacement = await asyncio.to_thread(
+                HOST.provision_web, order, service["ram_mb"], service["cpu"]
+            )
+            try:
+                await asyncio.to_thread(HOST.remove, service)
+            except Exception:
+                await asyncio.to_thread(HOST.remove, replacement)
+                raise
+            DB.delete_service(service_id)
+            DB.add_service(replacement)
+            await interaction.followup.send(
+                "Website redeployed successfully.",
+                embed=website_embed(replacement, "running"),
+                view=WebsiteControlView(replacement["user_id"], replacement["id"]),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.followup.send("Unknown website action.", ephemeral=True)
+    except Exception as exc:
+        await interaction.followup.send("Website action failed: " + safe_error(str(exc)), ephemeral=True)
+        log.exception("Website action %s failed for %s", action, service_id)
+
+
+async def show_mywebsites(interaction: discord.Interaction, service_id: str | None = None):
+    items = [item for item in DB.services(interaction.user.id) if item["kind"] == "web-app"]
+    if service_id:
+        selected = DB.service(service_id)
+        if not selected or selected["kind"] != "web-app" or (
+            selected["user_id"] != interaction.user.id and interaction.user.id not in ADMIN_IDS
+        ):
+            await interaction.response.send_message("Website not found or you do not own it.", ephemeral=True)
+            return
+        status = await actual_container_status(selected)
+        await interaction.response.send_message(
+            embed=website_embed(selected, status),
+            view=WebsiteControlView(selected["user_id"], selected["id"]),
+            ephemeral=True,
+        )
+        return
+
+    if not items:
+        await interaction.response.send_message(
+            "You do not have a website yet. Press **Deploy Website** on /start or run /web.",
+            ephemeral=True,
+        )
+        return
+
+    if len(items) == 1:
+        selected = items[0]
+        status = await actual_container_status(selected)
+        await interaction.response.send_message(
+            embed=website_embed(selected, status),
+            view=WebsiteControlView(selected["user_id"], selected["id"]),
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.send_message(
+        "Choose the website you want to manage:",
+        view=MyWebsitesView(interaction.user.id, items),
+        ephemeral=True,
+    )
+
+
 @bot.event
 async def setup_hook():
     if GUILD_ID:
