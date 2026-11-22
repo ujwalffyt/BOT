@@ -452,6 +452,8 @@ async def start(interaction: discord.Interaction):
 
 @bot.tree.command(name="help", description="Show hosting commands")
 async def help_command(interaction: discord.Interaction):
+    # Acknowledge immediately so the interaction token does not expire before the reply.
+    await interaction.response.defer(ephemeral=True, thinking=False)
     text = (
         "/start — open the panel\n/plans — show configured limits\n"
         "/vps — request an SSH container\n/web — request GitHub website deployment\n"
@@ -460,7 +462,21 @@ async def help_command(interaction: discord.Interaction):
     )
     if interaction.user.id in ADMIN_IDS:
         text += "\n/orders and /approve — manage requests\n/capacity and /instances — server status\n/remove — remove a service"
-    await interaction.response.send_message(text, ephemeral=True)
+    await interaction.followup.send(text, ephemeral=True)
+
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    original = getattr(error, "original", error)
+    log.error("Slash command failed: %s", original, exc_info=(type(original), original, original.__traceback__))
+    message = "That command failed. Please try again. If it keeps happening, send the admin the latest bot logs."
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+    except discord.HTTPException:
+        log.warning("Discord would not accept the error response for interaction %s", interaction.id)
 
 @bot.tree.command(name="plans", description="Show current VPS and website resource limits")
 async def plans(interaction: discord.Interaction):
