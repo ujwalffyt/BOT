@@ -364,7 +364,13 @@ class Host:
                 "domain": domain, "repo": repo, "image": image}
     def set_running(self, service, running):
         container = self.client.containers.get(service["container"])
-        container.start() if running else container.stop(timeout=10)
+        if running:
+            container.start()
+            if service["kind"] == "sshx-vps-container":
+                return self.wait_for_sshx_link(container)
+            return None
+        container.stop(timeout=10)
+        return None
     def remove(self, service):
         try: self.client.containers.get(service["container"]).remove(force=True)
         except docker.errors.NotFound: pass
@@ -374,11 +380,13 @@ class Host:
                 self.client.containers.get("neonhost-caddy").exec_run(["caddy", "reload", "--config", "/etc/caddy/Caddyfile"])
             except docker.errors.NotFound:
                 pass
-        if service["kind"] == "vps-container":
+        if service["kind"] in {"vps-container", "sshx-vps-container"}:
             try: self.client.networks.get(service["network"]).remove()
             except docker.errors.NotFound: pass
-        try: self.client.images.remove(service["image"], force=True)
-        except docker.errors.ImageNotFound: pass
+        # VPS instances share one base image; remove per-service images only for web apps.
+        if service["kind"] == "web-app":
+            try: self.client.images.remove(service["image"], force=True)
+            except docker.errors.ImageNotFound: pass
 
 HOST = None
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
