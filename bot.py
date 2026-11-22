@@ -418,7 +418,7 @@ def request_embed(oid, user, kind, data):
     embed.add_field(name="Customer", value=f"{user} ({user.id})", inline=True)
     if kind == "vps":
         embed.add_field(name="Requested allocation", value=f"{data['ram_mb']} MB RAM / {data['cpu']} CPU quota", inline=False)
-        embed.add_field(name="SSH key", value="Public key received; no private key requested.", inline=False)
+        embed.add_field(name="Access method", value="A private sshx browser-terminal link will be generated after approval.", inline=False)
     else:
         embed.add_field(name="GitHub repository", value=data["repo"], inline=False)
         embed.add_field(name="Internal port", value=str(data["port"]), inline=True)
@@ -432,7 +432,7 @@ class HostingPanel(discord.ui.View):
     @discord.ui.button(label="VPS hosting", style=discord.ButtonStyle.primary, emoji="🖥️")
     async def vps_button(self, interaction, button):
         await interaction.response.send_message(
-            "Request SSH access with /vps. Provide the RAM, CPU quota, and your public SSH key. "
+            "Request a VPS with /vps. Choose RAM and CPU quota; the bot creates an sshx browser-terminal link after approval. "
             "The administrator controls the final allocation.", ephemeral=True)
     @discord.ui.button(label="Deploy website", style=discord.ButtonStyle.success, emoji="🌐")
     async def web_button(self, interaction, button):
@@ -494,7 +494,7 @@ async def start(interaction: discord.Interaction):
                     "New services are reviewed by an administrator before provisioning.",
         color=discord.Color.blurple())
     embed.add_field(name="Web hosting", value="GitHub → Docker build → live URL", inline=True)
-    embed.add_field(name="VPS hosting", value="SSH access with enforced RAM and CPU caps", inline=True)
+    embed.add_field(name="VPS hosting", value="sshx browser terminal with enforced RAM and CPU caps", inline=True)
     embed.set_footer(text="Container VPS is not a dedicated KVM virtual machine.")
     await interaction.followup.send(embed=embed, view=HostingPanel())
 
@@ -504,7 +504,7 @@ async def help_command(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True, thinking=False)
     text = (
         "/start — open the panel\n/plans — show configured limits\n"
-        "/vps — request an SSH container\n/web — request GitHub website deployment\n"
+        "/vps — request an sshx browser VPS\n/web — request GitHub website deployment\n"
         "/my — list your services\n/stop and /resume — control a service\n"
         "/redeploy — rebuild your website from GitHub"
     )
@@ -531,27 +531,25 @@ async def plans(interaction: discord.Interaction):
     embed = discord.Embed(title="Hosting resource limits", color=discord.Color.green())
     embed.add_field(name="VPS", value=f"Default request: {DEFAULT_VPS_RAM} MB RAM / {DEFAULT_VPS_CPU} CPU quota\nMaximum per service: {MAX_RAM} MB / {MAX_CPU} CPU quota", inline=False)
     embed.add_field(name="Web hosting", value=f"Default: {DEFAULT_WEB_RAM} MB RAM / {DEFAULT_WEB_CPU} CPU quota per app", inline=False)
-    embed.add_field(name="Read carefully", value="CPU values are limits, not dedicated cores. Disk quotas are not enabled in this version.", inline=False)
+    embed.add_field(name="Read carefully", value="CPU values are limits, not dedicated cores. sshx links are live shared terminal sessions; anyone with a link can interact. Disk quotas are not enabled in this version.", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="vps", description="Request an SSH-accessible container VPS")
+@bot.tree.command(name="vps", description="Request a VPS with an sshx browser-terminal link")
 @app_commands.describe(ram_mb="RAM requested in MB; admin approves the actual allocation",
-                       cpu_quota="CPU quota requested; it is not a dedicated core count",
-                       ssh_public_key="Paste your .pub public key only; never paste your private key")
+                       cpu_quota="CPU quota requested; it is not a dedicated core count")
 async def vps(interaction: discord.Interaction,
               ram_mb: app_commands.Range[int, 128, 8192],
-              cpu_quota: app_commands.Range[float, 0.1, 4.0],
-              ssh_public_key: str):
-    try:
-        key = check_key(ssh_public_key)
-        if ram_mb > MAX_RAM or cpu_quota > MAX_CPU:
-            raise ValueError(f"Configured maximum is {MAX_RAM} MB RAM and {MAX_CPU} CPU quota.")
-    except ValueError as exc:
-        await interaction.response.send_message(str(exc), ephemeral=True)
+              cpu_quota: app_commands.Range[float, 0.1, 4.0]):
+    if ram_mb > MAX_RAM or cpu_quota > MAX_CPU:
+        await interaction.response.send_message(
+            f"Configured maximum is {MAX_RAM} MB RAM and {MAX_CPU} CPU quota.", ephemeral=True)
         return
-    data = {"ram_mb": int(ram_mb), "cpu": float(cpu_quota), "ssh_key": key}
+    data = {"ram_mb": int(ram_mb), "cpu": float(cpu_quota)}
     oid = DB.new_order(interaction.user.id, str(interaction.user), "vps", data)
-    await interaction.response.send_message(f"VPS request submitted. Order ID: {oid}. An admin must approve it.", ephemeral=True)
+    await interaction.response.send_message(
+        f"VPS request submitted. Order ID: {oid}. An admin must approve it. "
+        "After provisioning, a private sshx browser-terminal link will be sent to your DMs.",
+        ephemeral=True)
     await notify_admin(request_embed(oid, interaction.user, "vps", data))
 
 @bot.tree.command(name="web", description="Request deployment from a public GitHub repository")
