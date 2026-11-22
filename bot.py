@@ -52,7 +52,7 @@ PUBLIC_HOST = os.getenv("PUBLIC_HOST", "").strip()
 if not PUBLIC_HOST or PUBLIC_HOST == "YOUR_SERVER_IP":
     raise RuntimeError("Set PUBLIC_HOST to the server public IP or hostname")
 DOMAIN = os.getenv("WEB_ROOT_DOMAIN", "").strip().lower().strip(".")
-if DOMAIN and not re.fullmatch(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}", DOMAIN):
+if DOMAIN and not re.fullmatch(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}", DOMAIN):
     raise RuntimeError("WEB_ROOT_DOMAIN must be a valid domain name")
 
 RESERVED_RAM = integer("HOST_RESERVED_RAM_MB", 6144)
@@ -89,7 +89,7 @@ def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 def safe_error(value: str, limit: int = 900) -> str:
-    return " ".join(re.sub(r"\\x1b\\[[0-9;]*m", "", value or "").split())[-limit:]
+    return " ".join(re.sub(r"\x1b\[[0-9;]*m", "", value or "").split())[-limit:]
 
 def check_key(value: str) -> str:
     parts = (value or "").strip().split()
@@ -110,7 +110,7 @@ def check_repo(value: str) -> str:
         raise ValueError("Use a public HTTPS GitHub repository URL.")
     if parsed.username or parsed.password or parsed.port or parsed.query or parsed.fragment:
         raise ValueError("Do not include credentials, port, query, or fragment in the GitHub URL.")
-    if not re.fullmatch(r"/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\\.git)?/?", parsed.path):
+    if not re.fullmatch(r"/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?/?", parsed.path):
         raise ValueError("Send a repository URL, not a branch, file, issue, or pull-request URL.")
     path = parsed.path.rstrip("/")
     return "https://github.com" + (path if path.endswith(".git") else path + ".git")
@@ -327,7 +327,7 @@ class Host:
             )
             if domain:
                 site_file.write_text(
-                    f"{domain} {{\\n    encode zstd gzip\\n    reverse_proxy {name}:{app_port}\\n}}\\n",
+                    f"{domain} {{\n    encode zstd gzip\n    reverse_proxy {name}:{app_port}\n}}\n",
                     encoding="utf-8")
                 caddy = self.client.containers.get("neonhost-caddy")
                 result = caddy.exec_run(["caddy", "reload", "--config", "/etc/caddy/Caddyfile"])
@@ -421,7 +421,7 @@ class HostingPanel(discord.ui.View):
             await interaction.response.send_message("You have no active services.", ephemeral=True)
             return
         lines = [f"{s['id']} • {s['name']} • {s['status']} • {s['ram_mb']} MB / {s['cpu']} CPU" for s in items[:15]]
-        await interaction.response.send_message("\\n".join(lines), ephemeral=True)
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 @bot.event
 async def setup_hook():
@@ -453,19 +453,19 @@ async def start(interaction: discord.Interaction):
 @bot.tree.command(name="help", description="Show hosting commands")
 async def help_command(interaction: discord.Interaction):
     text = (
-        "/start — open the panel\\n/plans — show configured limits\\n"
-        "/vps — request an SSH container\\n/web — request GitHub website deployment\\n"
-        "/my — list your services\\n/stop and /resume — control a service\\n"
+        "/start — open the panel\n/plans — show configured limits\n"
+        "/vps — request an SSH container\n/web — request GitHub website deployment\n"
+        "/my — list your services\n/stop and /resume — control a service\n"
         "/redeploy — rebuild your website from GitHub"
     )
     if interaction.user.id in ADMIN_IDS:
-        text += "\\n/orders and /approve — manage requests\\n/capacity and /instances — server status\\n/remove — remove a service"
+        text += "\n/orders and /approve — manage requests\n/capacity and /instances — server status\n/remove — remove a service"
     await interaction.response.send_message(text, ephemeral=True)
 
 @bot.tree.command(name="plans", description="Show current VPS and website resource limits")
 async def plans(interaction: discord.Interaction):
     embed = discord.Embed(title="Hosting resource limits", color=discord.Color.green())
-    embed.add_field(name="VPS", value=f"Default request: {DEFAULT_VPS_RAM} MB RAM / {DEFAULT_VPS_CPU} CPU quota\\nMaximum per service: {MAX_RAM} MB / {MAX_CPU} CPU quota", inline=False)
+    embed.add_field(name="VPS", value=f"Default request: {DEFAULT_VPS_RAM} MB RAM / {DEFAULT_VPS_CPU} CPU quota\nMaximum per service: {MAX_RAM} MB / {MAX_CPU} CPU quota", inline=False)
     embed.add_field(name="Web hosting", value=f"Default: {DEFAULT_WEB_RAM} MB RAM / {DEFAULT_WEB_CPU} CPU quota per app", inline=False)
     embed.add_field(name="Read carefully", value="CPU values are limits, not dedicated cores. Disk quotas are not enabled in this version.", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -514,7 +514,7 @@ async def my(interaction: discord.Interaction):
     embed = discord.Embed(title="Your services", color=discord.Color.blurple())
     for s in items[:15]:
         embed.add_field(name=f"{s['name']} ({s['id']})",
-                        value=f"{s['kind']} • {s['status']}\\nRAM cap {s['ram_mb']} MB • CPU quota {s['cpu']}\\n{s['url']}",
+                        value=f"{s['kind']} • {s['status']}\nRAM cap {s['ram_mb']} MB • CPU quota {s['cpu']}\n{s['url']}",
                         inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -569,8 +569,8 @@ async def orders(interaction: discord.Interaction):
         d = o["data"]
         summary = (f"{d['ram_mb']} MB / {d['cpu']} CPU quota" if o["kind"] == "vps"
                    else f"{d['repo']} • port {d['port']} • {d['slug']}")
-        lines.append(f"{o['id']} • {o['kind']} • customer {o['user_id']}\\n{summary}")
-    await interaction.response.send_message("\\n\\n".join(lines), ephemeral=True)
+        lines.append(f"{o['id']} • {o['kind']} • customer {o['user_id']}\n{summary}")
+    await interaction.response.send_message("\n\n".join(lines), ephemeral=True)
 
 @bot.tree.command(name="approve", description="Admin: approve and provision an order")
 @app_commands.describe(order_id="Order ID shown by /orders",
@@ -593,12 +593,12 @@ async def approve(interaction: discord.Interaction, order_id: str,
                                           order, ram, cpu)
         DB.add_service(service)
         DB.set_order(order_id, "approved")
-        await interaction.followup.send(f"Order {order_id} approved. Service {service['id']} is running.\\n{service['url']}", ephemeral=True)
+        await interaction.followup.send(f"Order {order_id} approved. Service {service['id']} is running.\n{service['url']}", ephemeral=True)
         try:
             customer = await bot.fetch_user(order["user_id"])
             await customer.send(
-                f"Your NeonHost service is ready.\\nService ID: {service['id']}\\n"
-                f"Type: {service['kind']}\\nRAM cap: {ram} MB\\nCPU quota: {cpu}\\nAccess: {service['url']}\\n"
+                f"Your NeonHost service is ready.\nService ID: {service['id']}\n"
+                f"Type: {service['kind']}\nRAM cap: {ram} MB\nCPU quota: {cpu}\nAccess: {service['url']}\n"
                 "VPS access is an isolated Docker container, not a dedicated KVM virtual machine.")
         except discord.DiscordException:
             log.info("Unable to DM customer for service %s", service["id"])
@@ -644,7 +644,7 @@ async def instances(interaction: discord.Interaction):
         await interaction.response.send_message("No services have been provisioned.", ephemeral=True)
         return
     lines = [f"{s['id']} • owner {s['user_id']} • {s['kind']} • {s['status']} • {s['ram_mb']} MB / {s['cpu']} CPU" for s in items[:25]]
-    await interaction.response.send_message("\\n".join(lines), ephemeral=True)
+    await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 @bot.tree.command(name="remove", description="Admin: permanently remove a managed service")
 async def remove(interaction: discord.Interaction, service_id: str):
