@@ -87,19 +87,6 @@ def utcnow() -> str:
 def safe_error(value: str, limit: int = 900) -> str:
     return " ".join(re.sub(r"\x1b\[[0-9;]*m", "", value or "").split())[-limit:]
 
-def check_key(value: str) -> str:
-    parts = (value or "").strip().split()
-    allowed = {"ssh-ed25519", "ssh-rsa", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521", "sk-ssh-ed25519@openssh.com"}
-    if len(parts) < 2 or parts[0] not in allowed:
-        raise ValueError("Send an OpenSSH PUBLIC key such as id_ed25519.pub. Never send a private key.")
-    try:
-        decoded = base64.b64decode(parts[1], validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise ValueError("The public key data is invalid.") from exc
-    if len(decoded) < 20:
-        raise ValueError("That public key is too short.")
-    return " ".join(parts)
-
 def check_repo(value: str) -> str:
     parsed = urlparse((value or "").strip())
     if parsed.scheme != "https" or parsed.hostname != "github.com":
@@ -198,6 +185,9 @@ class Store:
     def set_service_status(self, sid, status):
         with self.db() as con:
             con.execute("UPDATE services SET status=? WHERE id=?", (status, sid))
+    def update_service_url(self, sid, url):
+        with self.db() as con:
+            con.execute("UPDATE services SET url=? WHERE id=?", (url, sid))
     def delete_service(self, sid):
         with self.db() as con:
             con.execute("DELETE FROM services WHERE id=?", (sid,))
