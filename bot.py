@@ -199,9 +199,19 @@ class Store:
             else:
                 rows = con.execute("SELECT * FROM services WHERE user_id=? ORDER BY created DESC", (user_id,)).fetchall()
         return [dict(row) for row in rows]
-    def allocations(self):
+    def allocations(self, exclude_service_id=None):
         with self.db() as con:
-            row = con.execute("SELECT COALESCE(SUM(ram_mb),0) AS ram, COALESCE(SUM(cpu),0) AS cpu FROM services WHERE status IN ('running','stopped','creating')").fetchone()
+            if exclude_service_id:
+                row = con.execute(
+                    "SELECT COALESCE(SUM(ram_mb),0) AS ram, COALESCE(SUM(cpu),0) AS cpu "
+                    "FROM services WHERE status IN ('running','stopped','creating') AND id<>?",
+                    (exclude_service_id,),
+                ).fetchone()
+            else:
+                row = con.execute(
+                    "SELECT COALESCE(SUM(ram_mb),0) AS ram, COALESCE(SUM(cpu),0) AS cpu "
+                    "FROM services WHERE status IN ('running','stopped','creating')"
+                ).fetchone()
         return int(row["ram"]), float(row["cpu"])
     def port_used(self, port):
         with self.db() as con:
@@ -237,12 +247,20 @@ class Host:
         remaining_cpu = max(0.0, cpu_count - RESERVED_CPU - used_cpu)
         return {"total": total, "free": free, "used_ram": used_ram, "used_cpu": used_cpu,
                 "remaining_ram": remaining_ram, "cpus": cpu_count, "remaining_cpu": remaining_cpu}
-    def check_capacity(self, ram, cpu):
+    def check_capacity(self, ram, cpu, exclude_service_id=None):
         if ram < 128 or ram > MAX_RAM:
             raise RuntimeError(f"RAM must be 128-{MAX_RAM} MB.")
         if cpu <= 0 or cpu > MAX_CPU:
             raise RuntimeError(f"CPU quota must be above 0 and no more than {MAX_CPU}.")
         cap = self.capacity()
+        if exclude_service_id:
+            used_ram, used_cpu = DB.allocations(exclude_service_id)
+            free_ram = cap["free"]
+            cap["remaining_ram"] = min(
+                max(0, cap["total"] - RESERVED_RAM - used_ram),
+                max(0, free_ram - MIN_FREE_RAM),
+            )
+            cap["remaining_cpu"] = max(0.0, cap["cpus"] - RESERVED_CPU - used_cpu)
         if ram > cap["remaining_ram"]:
             raise RuntimeError(f"Not enough safe RAM. Requested {ram} MB; safe remaining is {cap['remaining_ram']} MB.")
         if cpu > cap["remaining_cpu"]:
@@ -353,11 +371,11 @@ class Host:
             raise RuntimeError("GitHub clone timed out after 3 minutes.") from exc
         except subprocess.CalledProcessError as exc:
             raise RuntimeError("Git clone failed: " + safe_error((exc.stderr or "") + " " + (exc.stdout or ""))) from exc
-    def provision_web(self, order, ram, cpu):
+    def provision_web(self, order, ram, cpu, exclude_service_id=None):
         data = order["data"]
         repo, slug = check_repo(data["repo"]), check_slug(data["slug"])
         app_port = check_app_port(int(data["port"]))
-        self.check_capacity(ram, cpu)
+        self.check_capacity(ram, cpu, exclude_service_id)
         sid = uuid.uuid4().hex[:8]
         image = f"neonhost-web:{sid}"
         folder = WORK / sid
@@ -849,7 +867,7 @@ async def website_control_action(interaction: discord.Interaction, service_id: s
                 },
             }
             replacement = await asyncio.to_thread(
-                HOST.provision_web, order, service["ram_mb"], service["cpu"]
+                HOST.provision_web, order, service["ram_mb"], service["cpu"], service_id
             )
             try:
                 await asyncio.to_thread(HOST.remove, service)
@@ -1244,7 +1262,7 @@ async def redeploy(interaction: discord.Interaction, service_id: str):
     old_order = {"id": s["order_id"], "user_id": s["user_id"],
                  "data": {"repo": s["repo"], "slug": s["name"], "port": s["app_port"]}}
     try:
-        replacement = await asyncio.to_thread(HOST.provision_web, old_order, s["ram_mb"], s["cpu"])
+        replacement = await asyncio.to_thread(HOST.provision_web, old_order, s["ram_mb"], s["cpu"], service_id)
         DB.add_service(replacement)
         await asyncio.to_thread(HOST.remove, s)
         DB.delete_service(service_id)
