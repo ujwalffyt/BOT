@@ -524,6 +524,147 @@ class HostingPanel(discord.ui.View):
         lines = [f"{s['id']} • {s['name']} • {s['status']} • {s['ram_mb']} MB / {s['cpu']} CPU" for s in items[:15]]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
+class VPSControlView(discord.ui.View):
+    def __init__(self, owner_id: int, service_id: str):
+        super().__init__(timeout=900)
+        self.owner_id = owner_id
+        self.service_id = service_id
+        actions = [
+            ("Start", discord.ButtonStyle.success, "start"),
+            ("Stop", discord.ButtonStyle.secondary, "stop"),
+            ("Reinstall", discord.ButtonStyle.danger, "reinstall"),
+            ("SSH / New Link", discord.ButtonStyle.primary, "ssh"),
+        ]
+        for label, style, action in actions:
+            button = discord.ui.Button(label=label, style=style)
+
+            async def callback(interaction: discord.Interaction, selected_action=action):
+                await vps_control_action(interaction, self.service_id, selected_action)
+
+            button.callback = callback
+            self.add_item(button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id and interaction.user.id not in ADMIN_IDS:
+            await interaction.response.send_message("You do not own this VPS.", ephemeral=True)
+            return False
+        return True
+
+
+class ConfirmReinstallView(discord.ui.View):
+    def __init__(self, owner_id: int, service_id: str):
+        super().__init__(timeout=60)
+        self.owner_id = owner_id
+        self.service_id = service_id
+
+        confirm = discord.ui.Button(label="Confirm reinstall", style=discord.ButtonStyle.danger)
+        cancel = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
+
+        async def confirm_callback(interaction: discord.Interaction):
+            if interaction.user.id != self.owner_id and interaction.user.id not in ADMIN_IDS:
+                await interaction.response.send_message("You do not own this VPS.", ephemeral=True)
+                return
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            service = DB.service(self.service_id)
+            if not service or (service["user_id"] != self.owner_id and interaction.user.id not in ADMIN_IDS):
+                await interaction.followup.send("VPS not found or access denied.", ephemeral=True)
+                return
+            try:
+                replacement = await asyncio.to_thread(HOST.reinstall_vps, service)
+                DB.update_service(replacement)
+                await interaction.followup.send(
+                    f"VPS reinstalled successfully. OS: {VPS_OS_OPTIONS[replacement['os']]['label']}\n"
+                    f"RAM: {replacement['ram_mb']} MB • CPU quota: {replacement['cpu']}\n"
+                    f"New sshx link: {replacement['url']}\n"
+                    "Keep this link private; anyone who has it can use the terminal.",
+                    ephemeral=True,
+                )
+                try:
+                    customer = await bot.fetch_user(replacement["user_id"])
+                    await customer.send(
+                        f"Your VPS {replacement['id']} was reinstalled.\n"
+                        f"OS: {VPS_OS_OPTIONS[replacement['os']]['label']}\n"
+                        f"RAM: {replacement['ram_mb']} MB • CPU quota: {replacement['cpu']}\n"
+                        f"New sshx link: {replacement['url']}\n"
+                        "The old container filesystem was deleted. Keep the new link private."
+                    )
+                except discord.DiscordException:
+                    log.info("Could not DM new sshx link after reinstall for %s", replacement["id"])
+            except Exception as exc:
+                DB.set_service_status(self.service_id, "error")
+                await interaction.followup.send(
+                    "Reinstall failed. The previous container may already have been removed. "
+                    + safe_error(str(exc)),
+                    ephemeral=True,
+                )
+
+        async def cancel_callback(interaction: discord.Interaction):
+            await interaction.response.edit_message(content="Reinstall cancelled.", view=None)
+
+        confirm.callback = confirm_callback
+        cancel.callback = cancel_callback
+        self.add_item(confirm)
+        self.add_item(cancel)
+
+
+async def vps_control_action(interaction: discord.Interaction, service_id: str, action: str):
+    service = DB.service(service_id)
+    if not service or service["kind"] != "sshx-vps-container":
+        await interaction.response.send_message("VPS not found.", ephemeral=True)
+        return
+    if service["user_id"] != interaction.user.id and interaction.user.id not in ADMIN_IDS:
+        await interaction.response.send_message("You do not own this VPS.", ephemeral=True)
+        return
+    if action == "reinstall":
+        await interaction.response.send_message(
+            "Reinstalling permanently deletes everything inside this VPS container, then creates a fresh OS image. "
+            "This cannot be undone. Continue?",
+            view=ConfirmReinstallView(service["user_id"], service_id),
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        if action == "stop":
+            await asyncio.to_thread(HOST.set_running, service, False)
+            DB.set_service_status(service_id, "stopped")
+            await interaction.followup.send(
+                f"VPS {service_id} stopped. Its current sshx session link is no longer active.",
+                ephemeral=True,
+            )
+            return
+        if action == "start":
+            link = await asyncio.to_thread(HOST.set_running, service, True)
+            DB.set_service_status(service_id, "running")
+            if link:
+                DB.update_service_url(service_id, link)
+                await interaction.followup.send(
+                    f"VPS {service_id} started. New sshx link:\n{link}",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    f"VPS {service_id} is already running. Use SSH / New Link to rotate the session link.",
+                    ephemeral=True,
+                )
+            return
+        if action == "ssh":
+            link = await asyncio.to_thread(HOST.generate_sshx_link, service)
+            DB.update_service_url(service_id, link)
+            DB.set_service_status(service_id, "running")
+            await interaction.followup.send(
+                f"New sshx terminal link for VPS {service_id}:\n{link}\n"
+                "The previous session was restarted. Anyone with this link can interact with the terminal; keep it private.",
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send("Unknown VPS action.", ephemeral=True)
+    except Exception as exc:
+        await interaction.followup.send("VPS action failed: " + safe_error(str(exc)), ephemeral=True)
+        log.exception("VPS action %s failed for %s", action, service_id)
+
+
 @bot.event
 async def setup_hook():
     if GUILD_ID:
