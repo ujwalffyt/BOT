@@ -587,9 +587,23 @@ async def set_service(interaction, sid, running):
         return
     await interaction.response.defer(ephemeral=True, thinking=True)
     try:
-        await asyncio.to_thread(HOST.set_running, s, running)
+        new_link = await asyncio.to_thread(HOST.set_running, s, running)
         DB.set_service_status(sid, "running" if running else "stopped")
-        await interaction.followup.send(f"Service {sid} is now {'running' if running else 'stopped'}.", ephemeral=True)
+        if new_link:
+            DB.update_service_url(sid, new_link)
+            await interaction.followup.send(
+                f"Service {sid} is running again. Your new sshx session link is:\n{new_link}\n"
+                "Keep this link private; anyone who has it can interact with the terminal.",
+                ephemeral=True)
+            try:
+                customer = await bot.fetch_user(s["user_id"])
+                await customer.send(
+                    f"Your NeonHost VPS {sid} has restarted. New sshx session link:\n{new_link}\n"
+                    "Keep this link private; anyone who has it can interact with the terminal.")
+            except discord.DiscordException:
+                log.info("Could not DM refreshed sshx link for service %s", sid)
+        else:
+            await interaction.followup.send(f"Service {sid} is now {'running' if running else 'stopped'}.", ephemeral=True)
     except Exception as exc:
         await interaction.followup.send("Could not change service state: " + safe_error(str(exc)), ephemeral=True)
 
@@ -660,8 +674,10 @@ async def approve(interaction: discord.Interaction, order_id: str,
             customer = await bot.fetch_user(order["user_id"])
             await customer.send(
                 f"Your NeonHost service is ready.\nService ID: {service['id']}\n"
-                f"Type: {service['kind']}\nRAM cap: {ram} MB\nCPU quota: {cpu}\nAccess: {service['url']}\n"
-                "VPS access is an isolated Docker container, not a dedicated KVM virtual machine.")
+                f"Type: {service['kind']}\nRAM cap: {ram} MB\nCPU quota: {cpu}\n"
+                f"Access: {service['url']}\n"
+                "This is an sshx live browser-terminal session inside your isolated container. "
+                "Anyone with the link can interact with its terminal. Keep it private; restarting the VPS creates a new link.")
         except discord.DiscordException:
             log.info("Unable to DM customer for service %s", service["id"])
     except Exception as exc:
