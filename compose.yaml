@@ -6,8 +6,8 @@ services:
     env_file: .env
     volumes:
       - ./data:/app/data
+      - ./work:/app/work
       - ./caddy/sites:/app/caddy/sites
-      - ./vps-image:/app/vps-image:ro
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - caddy
@@ -15,7 +15,7 @@ services:
       - hosting
   caddy:
     image: caddy:2-alpine
-    container_name: caddy
+    container_name: neonhost-caddy
     restart: unless-stopped
     ports:
       - "80:80"
@@ -30,7 +30,7 @@ services:
       - hosting
 networks:
   hosting:
-    name: hosting
+    name: neonhost-proxy
     driver: bridge
 volumes:
   caddy_data:
