@@ -520,10 +520,7 @@ class HostingPanel(discord.ui.View):
 
     @discord.ui.button(label="My VPS", style=discord.ButtonStyle.secondary, emoji="🖥️", row=1)
     async def my_vps_button(self, interaction, button):
-        await interaction.response.send_message(
-            "Run /myvps to open your VPS details and its Start, Stop, Reinstall and SSH controls.",
-            ephemeral=True,
-        )
+        await show_myvps(interaction)
 
     @discord.ui.button(label="My Websites", style=discord.ButtonStyle.secondary, emoji="📂", row=1)
     async def my_websites_button(self, interaction, button):
@@ -1128,9 +1125,7 @@ async def set_service(interaction, sid, running):
     except Exception as exc:
         await interaction.followup.send("Could not change service state: " + safe_error(str(exc)), ephemeral=True)
 
-@bot.tree.command(name="myvps", description="Show your VPS OS, RAM, CPU, status and controls")
-@app_commands.describe(service_id="Optional VPS service ID, needed only if you have more than one VPS")
-async def myvps(interaction: discord.Interaction, service_id: str | None = None):
+async def show_myvps(interaction: discord.Interaction, service_id: str | None = None):
     items = [
         item for item in DB.services(interaction.user.id)
         if item["kind"] == "sshx-vps-container"
@@ -1213,6 +1208,12 @@ async def myvps(interaction: discord.Interaction, service_id: str | None = None)
     embed.add_field(name="Storage", value="Per-customer disk quota is not configured; reinstall deletes the container filesystem.", inline=False)
     await interaction.response.send_message(
         embed=embed, view=VPSControlView(item["user_id"], item["id"]), ephemeral=True)
+
+
+@bot.tree.command(name="myvps", description="Show your VPS OS, RAM, CPU, status and controls")
+@app_commands.describe(service_id="Optional VPS service ID, needed only if you have more than one VPS")
+async def myvps(interaction: discord.Interaction, service_id: str | None = None):
+    await show_myvps(interaction, service_id)
 
 
 @bot.tree.command(name="ssh", description="Generate a fresh sshx browser-terminal link for your VPS")
