@@ -969,12 +969,22 @@ async def approve(interaction: discord.Interaction, order_id: str,
         await interaction.followup.send(f"Order {order_id} approved. Service {service['id']} is running.\n{service['url']}", ephemeral=True)
         try:
             customer = await bot.fetch_user(order["user_id"])
-            await customer.send(
-                f"Your NeonHost service is ready.\nService ID: {service['id']}\n"
-                f"Type: {service['kind']}\nRAM cap: {ram} MB\nCPU quota: {cpu}\n"
-                f"Access: {service['url']}\n"
-                "This is an sshx live browser-terminal session inside your isolated container. "
-                "Anyone with the link can interact with its terminal. Keep it private; restarting the VPS creates a new link.")
+            if service["kind"] == "sshx-vps-container":
+                message = (
+                    f"Your NeonHost VPS is ready.\nService ID: {service['id']}\n"
+                    f"OS: {VPS_OS_OPTIONS[service['os']]['label']}\n"
+                    f"RAM cap: {ram} MB\nCPU quota: {cpu}\n"
+                    f"sshx browser-terminal link: {service['url']}\n"
+                    "Anyone with this link can interact with your terminal. Keep it private. "
+                    "Use /myvps for your controls; reinstalling erases the container filesystem."
+                )
+            else:
+                message = (
+                    f"Your NeonHost website is ready.\nService ID: {service['id']}\n"
+                    f"RAM cap: {ram} MB\nCPU quota: {cpu}\n"
+                    f"Website URL: {service['url']}"
+                )
+            await customer.send(message)
         except discord.DiscordException:
             log.info("Unable to DM customer for service %s", service["id"])
     except Exception as exc:
