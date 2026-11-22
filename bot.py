@@ -786,20 +786,49 @@ async def vps(
         ephemeral=True)
     await notify_admin(request_embed(oid, interaction.user, "vps", data))
 
-@bot.tree.command(name="web", description="Request deployment from a public GitHub repository")
-@app_commands.describe(repo="Public GitHub repository URL; must include a Dockerfile",
-                       app_port="Port the app listens on inside the container",
-                       site_slug="Short name for the website, e.g. portfolio")
-async def web(interaction: discord.Interaction, repo: str,
-              app_port: app_commands.Range[int, 1024, 65535], site_slug: str):
-    try:
-        data = {"repo": check_repo(repo), "port": check_app_port(app_port), "slug": check_slug(site_slug)}
-    except ValueError as exc:
-        await interaction.response.send_message(str(exc), ephemeral=True)
-        return
-    oid = DB.new_order(interaction.user.id, str(interaction.user), "web", data)
-    await interaction.response.send_message(f"Website deployment request submitted. Order ID: {oid}. An admin will review it.", ephemeral=True)
-    await notify_admin(request_embed(oid, interaction.user, "web", data))
+class WebsiteDeployModal(discord.ui.Modal, title="Deploy a website"):
+    repo = discord.ui.TextInput(
+        label="Public GitHub repository",
+        placeholder="https://github.com/username/project",
+        max_length=250,
+    )
+    app_port = discord.ui.TextInput(
+        label="Application port",
+        placeholder="3000 (Node/Next), 8080, or 80",
+        max_length=5,
+    )
+    site_slug = discord.ui.TextInput(
+        label="Website name",
+        placeholder="my-portfolio",
+        max_length=40,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            data = {
+                "repo": check_repo(self.repo.value),
+                "port": check_app_port(int(self.app_port.value.strip())),
+                "slug": check_slug(self.site_slug.value),
+            }
+        except (ValueError, TypeError) as exc:
+            await interaction.response.send_message(
+                "Please check the repository URL, app port and website name. " + str(exc),
+                ephemeral=True,
+            )
+            return
+        oid = DB.new_order(interaction.user.id, str(interaction.user), "web", data)
+        await interaction.response.send_message(
+            f"Website request submitted! Order ID: {oid}. "
+            "An admin will review your GitHub repository and approve the deployment.",
+            ephemeral=True,
+        )
+        await notify_admin(request_embed(oid, interaction.user, "web", data))
+
+
+@bot.tree.command(name="web", description="Open the simple GitHub website deployment form")
+async def web(interaction: discord.Interaction):
+    await interaction.response.send_modal(WebsiteDeployModal())
+
 
 @bot.tree.command(name="my", description="List your hosting services")
 async def my(interaction: discord.Interaction):
