@@ -257,11 +257,22 @@ class Host:
                 except OSError:
                     pass
         raise RuntimeError(f"No free host port in range {first}-{last}.")
-    def build_vps_image(self):
+    def build_vps_image(self, os_key):
+        if os_key not in VPS_OS_OPTIONS:
+            raise RuntimeError("Unsupported VPS operating system.")
+        image_tag = f"{VPS_IMAGE_PREFIX}:{os_key}"
         try:
-            self.client.images.get(VPS_IMAGE)
+            self.client.images.get(image_tag)
         except docker.errors.ImageNotFound:
-            self.client.images.build(path="/app/vps-image", tag=VPS_IMAGE, pull=True, rm=True, forcerm=True)
+            self.client.images.build(
+                path="/app/vps-image",
+                tag=image_tag,
+                buildargs={"BASE_IMAGE": VPS_OS_OPTIONS[os_key]["base"]},
+                pull=True,
+                rm=True,
+                forcerm=True,
+            )
+        return image_tag
     def wait_for_sshx_link(self, container, timeout=45, since=0):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -285,11 +296,14 @@ class Host:
             "Check outbound HTTPS/DNS and inspect the container logs."
         )
 
-    def provision_vps(self, order, ram, cpu):
+    def provision_vps(self, order, ram, cpu, service_id=None):
+        os_key = order["data"].get("os", "debian-12")
+        if os_key not in VPS_OS_OPTIONS:
+            raise RuntimeError("Unsupported VPS operating system.")
         self.check_capacity(ram, cpu)
-        self.build_vps_image()
+        image_tag = self.build_vps_image(os_key)
         self.check_capacity(ram, cpu)
-        sid = uuid.uuid4().hex[:8]
+        sid = service_id or uuid.uuid4().hex[:8]
         name, net = f"neonhost-vps-{sid}", f"neonhost-vps-net-{sid}"
         network = self.client.networks.create(
             net, driver="bridge", labels={"neonhost.managed": "true", "neonhost.service": sid}
@@ -298,13 +312,16 @@ class Host:
         started_at = int(time.time())
         try:
             container = self.client.containers.run(
-                VPS_IMAGE, name=name, detach=True,
-                tty=True, stdin_open=True, network=net,
+                image_tag, name=name, detach=True,
+                command=["sshx"], tty=True, stdin_open=True, network=net,
                 mem_limit=f"{ram}m", memswap_limit=f"{ram}m",
                 nano_cpus=int(cpu * 1_000_000_000), pids_limit=256,
                 cap_drop=["ALL"], security_opt=["no-new-privileges:true"],
                 restart_policy={"Name": "unless-stopped"}, init=True,
-                labels={"neonhost.managed": "true", "neonhost.kind": "vps-sshx", "neonhost.service": sid},
+                labels={
+                    "neonhost.managed": "true", "neonhost.kind": "vps-sshx",
+                    "neonhost.service": sid, "neonhost.os": os_key,
+                },
             )
             link = self.wait_for_sshx_link(container, since=started_at)
         except Exception:
@@ -318,11 +335,14 @@ class Host:
             except Exception:
                 pass
             raise
-        return {"id": sid, "user_id": order["user_id"], "order_id": order["id"],
-                "kind": "sshx-vps-container", "name": "SSHX browser VPS", "status": "running",
-                "container": container.name, "network": net, "ram_mb": ram, "cpu": cpu,
-                "host_port": None, "app_port": None, "url": link,
-                "domain": "", "repo": "", "image": VPS_IMAGE}
+        return {
+            "id": sid, "user_id": order["user_id"], "order_id": order["id"],
+            "kind": "sshx-vps-container", "name": VPS_OS_OPTIONS[os_key]["label"],
+            "status": "running", "container": container.name, "network": net,
+            "ram_mb": ram, "cpu": cpu, "host_port": None, "app_port": None,
+            "url": link, "domain": "", "repo": "", "image": image_tag, "os": os_key,
+        }
+
     def clone(self, repo, folder):
         shutil.rmtree(folder, ignore_errors=True)
         folder.mkdir(parents=True, exist_ok=True)
