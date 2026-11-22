@@ -26,7 +26,11 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config --quiet
-      - name: Build bot and SSH container images
-        run: |
-          docker build -t neonhost-bot:ci .
-          docker build -t neonhost-vps:ci ./vps-image
+      - name: Build Discord bot image
+        run: docker build -t neonhost-bot:ci .
+      - name: Build Ubuntu 24.04 VPS image
+        run: docker build --build-arg BASE_IMAGE=ubuntu:24.04 -t neonhost-vps:ubuntu-ci ./vps-image
+      - name: Build Debian 12 VPS image
+        run: docker build --build-arg BASE_IMAGE=debian:12-slim -t neonhost-vps:debian-ci ./vps-image
+      - name: Build Alpine 3.22 VPS image
+        run: docker build --build-arg BASE_IMAGE=alpine:3.22 -t neonhost-vps:alpine-ci ./vps-image
