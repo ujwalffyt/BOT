@@ -1,60 +1,105 @@
 # NeonHost — Discord VPS & Web Deploy Bot
 
-NeonHost is a Discord slash-command bot for GitHub website deployments and SSHX browser-terminal VPS containers. It provisions per-customer Docker containers on your Linux server and enforces RAM, CPU quota and PID limits.
+NeonHost is a Discord hosting panel for GitHub website deployments and OS-selected SSHX browser-terminal VPS containers. It provisions per-customer Docker containers on your Linux server and applies per-service RAM, CPU quota and PID limits.
 
-> **Important:** These are Linux userland containers, not dedicated KVM/QEMU virtual machines. All containers share the host Linux kernel. A selected OS changes the userspace/base image; it does not provide a separate kernel, systemd, nested Docker or KVM. Per-customer disk quotas are not enabled.
+> **Important:** VPS choices are Linux container userlands, not dedicated KVM/QEMU virtual machines. Containers share the host kernel. Per-customer disk quotas are not enabled.
 
-## Customer commands
+## Simple customer panel
 
-- `/start` — show the hosting entry panel.
-- `/vps` — request a VPS and choose Ubuntu, Debian or Alpine plus RAM/CPU limits.
-- `/myvps` — show your VPS OS, actual container status, RAM cap, CPU quota, creation time and control buttons.
-- `/ssh SERVICE_ID` — restart the SSHX terminal session and generate a fresh browser link.
-- `/stop SERVICE_ID` and `/resume SERVICE_ID` — stop/start a service.
-- `/reinstall SERVICE_ID` — confirm and rebuild your VPS using the same OS/RAM/CPU allocation. This deletes the old container filesystem.
-- `/web` — request deployment of a public GitHub repository containing a Dockerfile.
-- `/my`, `/redeploy SERVICE_ID`, `/help`, `/plans`.
+Run `/start`. The panel has four direct buttons:
 
-The `/myvps` control panel also has **Start**, **Stop**, **Reinstall**, and **SSH / New Link** buttons. Reinstall requires a second confirmation.
+- **VPS Hosting** — see how to request a VPS.
+- **Deploy Website** — opens a short form; customers enter a public GitHub URL, the app port and a site name.
+- **My VPS** — opens the VPS control instructions; run `/myvps` for the control panel.
+- **My Websites** — opens the website selector or directly opens the only website owned by the customer.
 
-## Operating systems offered
+## Website hosting
 
+### Deploy a website
+
+Run `/web` or click **Deploy Website** on `/start`. A modal asks for:
+1. Public GitHub repository URL.
+2. Internal application port (examples: 3000 for many Node apps, 8080, or 80 for static web servers).
+3. A short website name/slug.
+
+The app must listen on `0.0.0.0` and the repository must include a Dockerfile. The request enters the admin review queue. An admin approves it with `/approve ORDER_ID`; only then is the repository cloned, built and started.
+
+### Manage websites
+
+Run `/myweb` or click **My Websites** on `/start`. Select a website to view its URL, status, RAM cap, CPU quota, app port, GitHub repository and creation time.
+
+The website control panel provides:
+- **Start** — start a stopped website.
+- **Stop** — stop the website container.
+- **Redeploy** — build a replacement from the saved GitHub repository and switch to it.
+- **Delete** — permanently remove the website after confirmation.
+- **Open Website** — open the live URL.
+
+Website redeploy is the equivalent of reinstall/rebuild for a web app. Website hosting does not use SSHX terminal access; SSHX is the separate customer VPS access method.
+
+With `WEB_ROOT_DOMAIN` and wildcard DNS configured, Caddy can provide HTTPS subdomains. Otherwise the bot returns a direct HTTP port URL.
+
+**Only approve code you own or trust.** Dockerfile build instructions execute during image builds through the host Docker builder. This first version is intended for admin-reviewed deployments, not arbitrary untrusted public builds.
+
+## VPS hosting
+
+Run `/vps` and choose:
 - Ubuntu 24.04 LTS
 - Debian 12 Bookworm
 - Alpine Linux 3.22
+- Requested RAM and CPU quota
 
-These are the supported container base images in this version. They are not full virtual machines.
+An admin approves with `/approve ORDER_ID` and can override the requested allocation. The bot builds the selected base image, installs SSHX inside the isolated customer container and privately DMs the browser-terminal link.
 
-## SSHX access model
+### Manage VPS
 
-The bot runs the official `sshx` client inside each customer's isolated container. SSHX prints a unique browser-session link. The link is a bearer credential: anyone who obtains it can interact with that terminal. Send it only by customer DM, do not post it in a public channel, and ask customers to keep it private.
+Run `/myvps` for the selected OS, live container status, RAM allocation and usage, CPU quota and sampled CPU usage, service ID and controls.
 
-The SSHX client connects to the hosted `sshx.io` service. This project does not self-host the SSHX relay. If the customer stops the VPS, the current terminal session ends. Starting it again or pressing **SSH / New Link** starts a new session and issues a new link.
+Buttons:
+- **Start** — start the container and provide a fresh SSHX link if it was stopped.
+- **Stop** — stop the container; its active SSHX terminal ends.
+- **Reinstall** — confirm, delete the current container filesystem and create a fresh container with the same OS/RAM/CPU settings.
+- **SSH / New Link** — restart the SSHX terminal session and issue a new link.
 
-This is not a conventional SSH server and does not provide an OpenSSH host/port. Customers do not submit SSH public keys in this mode.
+You can also use `/ssh SERVICE_ID` and `/reinstall SERVICE_ID`. Reinstall deletes the old container filesystem and cannot be undone.
 
-## Admin commands
+### SSHX access warning
 
+SSHX provides a live browser-terminal session. Anyone who obtains its link can interact with that terminal. The bot sends links privately by Discord DM; customers should keep them secret. This project uses the hosted `sshx.io` relay and does not self-host the relay. This is not conventional OpenSSH access, and customers do not provide public SSH keys.
+
+## Commands
+
+Customer:
+- `/start` — simple hosting dashboard.
+- `/vps` — request a VPS and select OS/RAM/CPU.
+- `/myvps` — VPS info and controls.
+- `/ssh SERVICE_ID` — issue a fresh SSHX link.
+- `/reinstall SERVICE_ID` — reinstall a VPS after confirmation.
+- `/web` — open the website deploy form.
+- `/myweb` — website information and controls.
+- `/my` — list all services.
+- `/stop SERVICE_ID`, `/resume SERVICE_ID` — generic service controls.
+- `/redeploy SERVICE_ID` — rebuild a website.
+- `/help`, `/plans`.
+
+Admin:
 - `/orders` — pending requests.
-- `/approve ORDER_ID [ram_mb] [cpu_quota]` — inspect/approve and provision a service. Optional limits override the requested/default values.
+- `/approve ORDER_ID [ram_mb] [cpu_quota]` — provision with optional allocation overrides.
 - `/reject ORDER_ID` — reject a request.
-- `/capacity` — show detected host capacity and safe remaining limits.
-- `/instances` — list services.
-- `/remove SERVICE_ID` — delete a managed service.
+- `/capacity` — detected server capacity.
+- `/instances` — list all managed services.
+- `/remove SERVICE_ID` — delete a service.
 
-Only users listed in `ADMIN_IDS` can run admin commands.
+Only users in `ADMIN_IDS` can run admin commands.
 
-## Requirements
+## Requirements and install
 
-- Ubuntu/Debian Linux VPS with Docker Engine and Docker Compose plugin.
-- Discord application with the `bot` and `applications.commands` OAuth scopes.
-- Bot permissions to view/send messages, embed links and use application commands.
-- Discord numeric admin user ID.
-- Public IP/hostname for website links.
-- Inbound TCP 80/443 for Caddy when using a domain. Without a domain, direct website ports 8000–8999 are used.
-- Outbound HTTPS/DNS from the VPS and from customer containers so the SSHX client can reach `sshx.io`.
-
-## Install
+- Linux VPS with Docker Engine and Docker Compose plugin.
+- Discord application invited with `bot` and `applications.commands` scopes.
+- Bot permissions for messages, embeds and application commands.
+- Discord numeric administrator ID.
+- Public IP/hostname for web URLs.
+- Outbound HTTPS/DNS from the host and customer containers so SSHX can reach `sshx.io`.
 
 ```bash
 git clone https://github.com/ujwalffyt/BOT.git neonhost
@@ -63,64 +108,25 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-The first run creates `.env`. Edit it:
-
-- `DISCORD_BOT_TOKEN` — bot token from the Discord Developer Portal.
-- `ADMIN_IDS` — comma-separated numeric Discord user IDs.
-- `PUBLIC_HOST` — actual public IP/hostname.
-- `DISCORD_GUILD_ID=0` — global slash-command sync. Set a server ID only when the bot is already invited to that server and you want test-server sync.
-- `WEB_ROOT_DOMAIN` — optional domain you control. Create wildcard DNS for `*.WEB_ROOT_DOMAIN` pointing to `PUBLIC_HOST`.
-
-Then start the stack:
+Edit `.env` with `DISCORD_BOT_TOKEN`, `ADMIN_IDS`, `PUBLIC_HOST`, and optional domain settings, then run:
 
 ```bash
 ./deploy.sh
 docker compose logs -f bot
 ```
 
-Invite the bot with both the `bot` and `applications.commands` scopes. Slash commands are synced globally unless `DISCORD_GUILD_ID` is configured.
+Set `DISCORD_GUILD_ID=0` for global slash-command sync. Use a guild ID only if the bot is already invited to that Discord server and you want guild-scoped sync.
 
-## Capacity settings
+## Capacity, security and limitations
 
-The sample `.env.example` reserves 6 GB RAM for the host and keeps 2 GB free as a safety margin. Adjust these after checking the server's actual workloads. The bot also checks Docker's detected RAM, live available memory, CPU count and existing NeonHost allocations before provisioning.
-
-- `MAX_INSTANCE_RAM_MB` and `MAX_INSTANCE_CPU_CORES` cap a single allocation.
-- `VPS_RAM_MB` and `VPS_CPU_CORES` are the default VPS request limits.
-- `WEB_RAM_MB` and `WEB_CPU_CORES` are default website container limits.
-
-CPU quota is a cap, not a promise of a dedicated physical core. Allocated RAM is a Docker memory cap, not extra RAM invented by the bot.
-
-## Website deployment
-
-Customers submit a public GitHub repo, the internal app port and a slug using `/web`. The repo must contain a Dockerfile, and the app must listen on `0.0.0.0`. An admin must inspect and approve the repository before it is built.
-
-**Only approve source code you own or trust.** Dockerfile instructions execute during image builds on the host's Docker builder. This first version is intended for reviewed repositories, not arbitrary untrusted public builds.
-
-With `WEB_ROOT_DOMAIN` and wildcard DNS configured, Caddy routes HTTPS to the app. Otherwise, the bot returns a direct HTTP port URL.
-
-## VPS lifecycle
-
-1. Customer requests a VPS with `/vps`, chooses OS, RAM and CPU quota.
-2. Admin reviews the request and runs `/approve ORDER_ID`. Admin can override RAM/CPU during approval.
-3. Bot builds the selected base image with SSHX installed, starts a resource-limited container and DMs the link.
-4. Customer runs `/myvps` for details and controls.
-
-The VPS control buttons:
-- **Start** — starts a stopped container and returns its new SSHX link.
-- **Stop** — stops the container and ends the current SSHX session.
-- **Reinstall** — requires confirmation, deletes the old container filesystem, then rebuilds the same OS with the same RAM/CPU limits.
-- **SSH / New Link** — restarts the terminal session and sends a fresh SSHX link; the old link's session ends.
-
-## Security and operational limitations
-
-- **SSHX links are secrets.** Anyone who gets the URL may use the live terminal. Send links privately and rotate them if exposed.
-- **Third-party relay:** SSHX uses the hosted `sshx.io` relay; this project does not operate its own SSHX relay. Do not use this access model for workloads that require a self-hosted terminal relay.
-- **Docker socket:** the bot mounts `/var/run/docker.sock`. Docker API access is effectively host-root access. Keep the bot token secret and keep `ADMIN_IDS` restricted. Do not expose Docker's API over public TCP.
-- **Container isolation:** containers share the host kernel. For hostile or mutually untrusted tenants, use a hypervisor or separately isolated worker machines.
-- **Disk quotas:** per-customer disk/storage quotas are not implemented. A container may consume host disk. Do not promise disk quota until filesystem/project quotas or isolated volumes are added and tested.
-- **Build safety:** reviewed Dockerfiles only. Untrusted builds need separately isolated, resource-limited build workers.
-- **No payments/refills:** payments, subscriptions, automatic renewals/refills and billing are not implemented.
-- **Backups:** reinstall and removal delete the container's writable filesystem. Customers must back up files before reinstalling. Back up `./data` and customer files.
+- Sample .env settings reserve 6 GB for the host and 2 GB of free memory. Recalculate for actual server load.
+- RAM values are Docker memory caps. CPU quota is a cap, not a dedicated physical core.
+- The bot mounts `/var/run/docker.sock`; Docker API access is effectively host-root. Keep the bot token secret and restrict `ADMIN_IDS`. Never expose the Docker API over public TCP.
+- Containers share the host kernel. For hostile/untrusted tenants, use KVM or separate worker hosts.
+- Per-customer disk quotas are not implemented; do not promise a fixed disk quota.
+- Payment, renewal and automatic refill/billing systems are not implemented.
+- Reinstall and delete remove the writable container filesystem. Customers must back up files first.
+- Keep SSHX links private; anyone possessing a link can use the terminal.
 
 ## Maintenance
 
