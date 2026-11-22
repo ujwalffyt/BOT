@@ -238,12 +238,12 @@ class Host:
             self.client.images.get(VPS_IMAGE)
         except docker.errors.ImageNotFound:
             self.client.images.build(path="/app/vps-image", tag=VPS_IMAGE, pull=True, rm=True, forcerm=True)
-    def wait_for_sshx_link(self, container, timeout=45):
+    def wait_for_sshx_link(self, container, timeout=45, since=0):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             container.reload()
             try:
-                raw = container.logs(stdout=True, stderr=True, tail=100)
+                raw = container.logs(stdout=True, stderr=True, since=since, tail=100)
                 output = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
             except docker.errors.APIError:
                 output = ""
@@ -271,9 +271,10 @@ class Host:
             net, driver="bridge", labels={"neonhost.managed": "true", "neonhost.service": sid}
         )
         container = None
+        started_at = int(time.time())
         try:
             container = self.client.containers.run(
-                VPS_IMAGE, name=name, detach=True, command=["sshx"],
+                VPS_IMAGE, name=name, detach=True,
                 tty=True, stdin_open=True, network=net,
                 mem_limit=f"{ram}m", memswap_limit=f"{ram}m",
                 nano_cpus=int(cpu * 1_000_000_000), pids_limit=256,
@@ -281,7 +282,7 @@ class Host:
                 restart_policy={"Name": "unless-stopped"}, init=True,
                 labels={"neonhost.managed": "true", "neonhost.kind": "vps-sshx", "neonhost.service": sid},
             )
-            link = self.wait_for_sshx_link(container)
+            link = self.wait_for_sshx_link(container, since=started_at)
         except Exception:
             if container is not None:
                 try:
@@ -365,9 +366,10 @@ class Host:
     def set_running(self, service, running):
         container = self.client.containers.get(service["container"])
         if running:
+            started_at = int(time.time())
             container.start()
             if service["kind"] == "sshx-vps-container":
-                return self.wait_for_sshx_link(container)
+                return self.wait_for_sshx_link(container, since=started_at)
             return None
         container.stop(timeout=10)
         return None
