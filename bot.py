@@ -68,7 +68,12 @@ WEB_LAST = integer("WEB_PORT_END", 8999)
 DB_PATH = os.getenv("DB_PATH", "/app/data/hosting.sqlite3")
 WORK = Path(os.getenv("WORK_DIR", "/app/work"))
 SITES = Path(os.getenv("SITES_DIR", "/app/caddy/sites"))
-VPS_IMAGE = "neonhost-vps:sshx-1"
+VPS_IMAGE_PREFIX = "neonhost-vps"
+VPS_OS_OPTIONS = {
+    "ubuntu-24.04": {"label": "Ubuntu 24.04 LTS", "base": "ubuntu:24.04"},
+    "debian-12": {"label": "Debian 12 Bookworm", "base": "debian:12-slim"},
+    "alpine-3.22": {"label": "Alpine Linux 3.22", "base": "alpine:3.22"},
+}
 PROXY_NETWORK = "neonhost-proxy"
 
 if not 1024 <= WEB_FIRST <= WEB_LAST <= 65535:
