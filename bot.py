@@ -122,11 +122,15 @@ class Store:
               kind TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL,
               container TEXT NOT NULL, network TEXT NOT NULL, ram_mb INTEGER NOT NULL,
               cpu REAL NOT NULL, host_port INTEGER, app_port INTEGER, url TEXT NOT NULL,
-              domain TEXT NOT NULL, repo TEXT NOT NULL, image TEXT NOT NULL, created TEXT NOT NULL
+              domain TEXT NOT NULL, repo TEXT NOT NULL, image TEXT NOT NULL, created TEXT NOT NULL,
+              os TEXT NOT NULL DEFAULT 'debian-12'
             );
             CREATE INDEX IF NOT EXISTS order_status_idx ON orders(status);
             CREATE INDEX IF NOT EXISTS service_user_idx ON services(user_id);
             """)
+            service_columns = {row["name"] for row in con.execute("PRAGMA table_info(services)")}
+            if "os" not in service_columns:
+                con.execute("ALTER TABLE services ADD COLUMN os TEXT NOT NULL DEFAULT 'debian-12'")
     def db(self):
         con = sqlite3.connect(DB_PATH, timeout=30)
         con.row_factory = sqlite3.Row
@@ -158,12 +162,27 @@ class Store:
             con.execute("UPDATE orders SET status=? WHERE id=?", (status, oid))
     def add_service(self, s):
         with self.db() as con:
-            con.execute("INSERT INTO services VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
-                s["id"], s["user_id"], s["order_id"], s["kind"], s["name"], s["status"],
-                s["container"], s["network"], s["ram_mb"], s["cpu"], s.get("host_port"),
-                s.get("app_port"), s["url"], s.get("domain", ""), s.get("repo", ""),
-                s["image"], utcnow()
-            ))
+            con.execute(
+                "INSERT INTO services(id,user_id,order_id,kind,name,status,container,network,ram_mb,cpu,host_port,app_port,url,domain,repo,image,created,os) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    s["id"], s["user_id"], s["order_id"], s["kind"], s["name"], s["status"],
+                    s["container"], s["network"], s["ram_mb"], s["cpu"], s.get("host_port"),
+                    s.get("app_port"), s["url"], s.get("domain", ""), s.get("repo", ""),
+                    s["image"], utcnow(), s.get("os", "debian-12")
+                )
+            )
+    def update_service(self, s):
+        with self.db() as con:
+            con.execute(
+                "UPDATE services SET user_id=?,order_id=?,kind=?,name=?,status=?,container=?,network=?,ram_mb=?,cpu=?,host_port=?,app_port=?,url=?,domain=?,repo=?,image=?,os=? WHERE id=?",
+                (
+                    s["user_id"], s["order_id"], s["kind"], s["name"], s["status"],
+                    s["container"], s["network"], s["ram_mb"], s["cpu"], s.get("host_port"),
+                    s.get("app_port"), s["url"], s.get("domain", ""), s.get("repo", ""),
+                    s["image"], s.get("os", "debian-12"), s["id"]
+                )
+            )
     def service(self, sid):
         with self.db() as con:
             row = con.execute("SELECT * FROM services WHERE id=?", (sid.lower(),)).fetchone()
